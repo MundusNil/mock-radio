@@ -22,8 +22,10 @@ AI 主播驱动的氛围音乐电台。音乐永远是主体，主播**梦可**�
 ## 快速开台
 
 ```bash
-pnpm install    # Node >= 22；FFmpeg 仓库已自带，零外部依赖
-pnpm start      # 体检环境 → 曲库自动入库 → 拉起电台 + 面板
+corepack enable         # 没有 pnpm 的话先跑这个（或 npm i -g pnpm）
+pnpm install            # Node >= 22
+pnpm setup:ffmpeg       # 首次：自动下载官方 FFmpeg 构建（已有系统 ffmpeg 会跳过）
+pnpm start              # 体检环境 → 曲库自动入库 → 拉起电台 + 面板
 ```
 
 把音频丢进 `config/library/`（子文件夹随便嵌套，支持 `.mp3` `.flac` `.ogg` `.m4a` `.wav` `.opus` `.aac`），启动后浏览器打开 **http://localhost:9731** 即可收听。
@@ -35,7 +37,7 @@ pnpm start      # 体检环境 → 曲库自动入库 → 拉起电台 + 面板
 <summary>环境细节与可选依赖</summary>
 
 - **TTS**：默认 **MiniMax 云端**（不需要本地 Python）。只有跑 `pnpm voice:compare`（edge-tts 音色盲听）或把 `tts.provider` 改回 `edge-tts` 时才需要 `pnpm setup:voice`
-- **FFmpeg**：仓库自带；想用系统的也行（`winget install Gyan.FFmpeg` / `brew install ffmpeg` / `apt install ffmpeg`）
+- **FFmpeg**：`pnpm setup:ffmpeg` 一键装进仓库（Windows 拉 gyan.dev 官方 zip，Linux 拉 johnvansickle 静态构建，macOS 走 brew）；已有系统 ffmpeg 则跳过。手动兜底：`winget install Gyan.FFmpeg` / `brew install ffmpeg` / `apt install ffmpeg`
 - **习惯 `.env` 管理密钥**：`cp .env.example .env` 后填入，效果同面板
 - **端口**：电台 `:9730`、面板 `:9731`；`pnpm stop` 回收残留进程
 
@@ -53,6 +55,7 @@ pnpm start      # 体检环境 → 曲库自动入库 → 拉起电台 + 面板
 | 命令 | 作用 |
 | --- | --- |
 | `pnpm start` / `pnpm stop` | 一键启动 / 回收 9730 · 9731 残留进程 |
+| `pnpm setup:ffmpeg` | 首次部署补齐 FFmpeg（装进 `tools/ffmpeg/`） |
 | `pnpm scan` | 手动重扫曲库（通常不需要，启动时自检） |
 | `pnpm voice:compare` | TTS 音色盲听对比（挑她的声音） |
 | `pnpm test` / `pnpm check` | Vitest 全量 / Biome lint + 格式 |

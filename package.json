@@ -12,6 +12,7 @@
     "start": "node scripts/start.mjs",
     "stop": "node scripts/stop.mjs",
     "setup:voice": "python -m pip install edge-tts",
+    "setup:ffmpeg": "node scripts/setup-ffmpeg.mjs",
     "dev:station": "pnpm --filter @mock-radio/station dev",
     "dev:web": "pnpm --filter @mock-radio/web dev",
     "scan": "pnpm --filter @mock-radio/station scan",
