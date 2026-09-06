@@ -2,12 +2,10 @@ packages:
   - apps/*
   - packages/*
 
-onlyBuiltDependencies:
-  - esbuild
-
 minimumReleaseAgeExclude:
   - hono@4.13.3
 
 allowBuilds:
-  better-sqlite3: true
   esbuild: true
+  # v13 自带全平台预编译二进制；显式拒绝 node-gyp 构建（true 会在缺 VS C++ 工具链的机器上让 install 直接失败）
+  better-sqlite3: false
