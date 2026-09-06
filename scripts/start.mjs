@@ -5,13 +5,15 @@
  * 用户只需两条命令：pnpm install && pnpm start
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { freeRadioPorts, radioPorts } from './ports.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const AUDIO_EXT = /\.(flac|mp3|wav|ogg|m4a|aac|opus)$/i;
+// pnpm stop 杀进程前立的哨兵：Windows 强杀退出码固定 1，靠它区分「被停」和「真崩」
+const STOP_FLAG = join(ROOT, 'data', '.stop-requested');
 
 const CYAN = '\u001b[36m';
 const GREEN = '\u001b[32m';
@@ -62,9 +64,12 @@ const localFfmpeg = join(ROOT, 'tools', 'ffmpeg', 'ffmpeg.exe');
 const localFfprobe = join(ROOT, 'tools', 'ffmpeg', 'ffprobe.exe');
 const hasLocalFf = existsSync(localFfmpeg) && existsSync(localFfprobe);
 const onPath = run(process.platform === 'win32' ? 'where' : 'which', ['ffprobe']).ok;
-if (hasLocalFf) console.log(`  ${OK} ffmpeg（仓库自带）`);
+if (hasLocalFf) console.log(`  ${OK} ffmpeg（tools/ffmpeg/）`);
 else if (onPath) console.log(`  ${OK} ffmpeg（系统 PATH）`);
-else blockers.push('缺少 ffprobe/ffmpeg：把两个 exe 放进 tools/ffmpeg/，或安装到系统 PATH');
+else
+  blockers.push(
+    '缺少 ffprobe/ffmpeg：跑 pnpm setup:ffmpeg 自动安装，或把两个 exe 放进 tools/ffmpeg/ / 装到系统 PATH',
+  );
 
 // 密钥不再是启动门槛：没配则梦可静默（音乐照常），启动后在面板右上角「设置 → API 管理」填写即热生效。
 const envPath = join(ROOT, '.env');
@@ -136,6 +141,11 @@ if (!tsx || !vite) {
 }
 
 const [stationPort, webPort] = radioPorts();
+try {
+  rmSync(STOP_FLAG, { force: true }); // 清掉上一轮可能残留的哨兵
+} catch {
+  /* ignore */
+}
 
 const station = spawn(node, [tsx, 'src/index.ts'], {
   cwd: join(ROOT, 'apps', 'station'),
@@ -151,8 +161,17 @@ const shutdown = () => {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 station.on('exit', (code) => {
-  console.log(rd(`电台进程退出（${code}）`));
   web?.kill();
+  if (existsSync(STOP_FLAG)) {
+    try {
+      rmSync(STOP_FLAG, { force: true });
+    } catch {
+      /* ignore */
+    }
+    console.log(`\n${gr('[OK]')} 电台已被停止（pnpm stop）\n`);
+    process.exit(0);
+  }
+  console.log(rd(`电台进程退出（${code}）`));
   process.exit(code ?? 1);
 });
 

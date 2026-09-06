@@ -47,7 +47,7 @@ export function parseNetstatPids(stdout, port) {
 
 export function pidsOnPort(port) {
   if (process.platform === 'win32') {
-    // 不要加 -p tcp：Windows 会因此丢掉 [::1] 上的 Vite（IPv6 localhost）
+    // 全量扫描再按端口过滤：比 -p tcp 稳，不受监听栈（IPv4/IPv6）变化影响
     const r = spawnSync('netstat', ['-ano'], { encoding: 'utf8' });
     return parseNetstatPids(r.stdout ?? '', port).filter((pid) => pid !== process.pid);
   }
