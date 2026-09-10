@@ -40,6 +40,12 @@ export interface EngineConfig {
   speakWhenAlone: boolean;
   /** 段落生成超时：组装层无响应则静默丢弃，节奏照常（ER 哲学：故障不卡死节目） */
   pendingTimeoutMs: number;
+  /**
+   * LLM+TTS 墙钟预算。主动串场只在本曲剩余 ≥ 此值时开工；
+   * 到期落在本曲内则在剩余降到此值时预取。短于预算的曲子跳过主动串场。
+   * 留言 / 点歌 / 台呼不受此限。
+   */
+  produceBudgetMs: number;
 }
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
@@ -63,6 +69,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   },
   speakWhenAlone: false,
   pendingTimeoutMs: 120_000,
+  produceBudgetMs: 45_000,
 };
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   retrievalLimit: 3,

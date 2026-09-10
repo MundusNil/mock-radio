@@ -121,11 +121,20 @@ export function createRadio(deps: RadioDeps): Radio {
   let currentTts = deps.ttsFactory();
   // producer 持有下面两个稳定代理：密钥热重建只换 current*，不用重建 producer
   const llm: LlmClient = {
-    generateSegment: (prompt) => currentLlm.generateSegment(prompt),
+    generateSegment: (prompt, signal) => currentLlm.generateSegment(prompt, signal),
     extractMemories: (text) => currentLlm.extractMemories(text),
+    researchDesk: (brief, signal) => {
+      if (!currentLlm.researchDesk) {
+        return Promise.resolve({ trackId: brief.trackId, queries: brief.queries, notes: [] });
+      }
+      return currentLlm.researchDesk(brief, signal).then((notes) => {
+        console.log(`[radio] 案头 ${brief.title}：${notes.notes.length} 条`);
+        return notes;
+      });
+    },
   };
   const tts: TtsClient = {
-    synthesize: (input) => currentTts.synthesize(input),
+    synthesize: (input, signal) => currentTts.synthesize(input, signal),
   };
 
   const engine = createEngine({ config: deps.engineConfig, rng: Math.random });
@@ -146,6 +155,8 @@ export function createRadio(deps: RadioDeps): Radio {
   const voiceSegments = new Map<string, VoiceSegment>();
   /** 已播出的段落（供 /audio/segment/:id 回放引用，按 startedAt 淘汰） */
   const airedSegments: VoiceSegment[] = [];
+  /** 在途 LLM/TTS：曲目结束或超时丢段时 abort */
+  const inflight = new Map<string, AbortController>();
 
   const producer = createSegmentProducer({
     llm,
@@ -176,14 +187,30 @@ export function createRadio(deps: RadioDeps): Radio {
               .sort((a, b) => (a.airedAt ?? 0) - (b.airedAt ?? 0))
               .slice(-2)
               .map((s) => ({ kind: s.kind, text: s.text }));
+      const current = snap.trackId ? (trackById.get(snap.trackId) ?? null) : null;
+      let nextTrackDurationMs: number | null = null;
+      try {
+        nextTrackDurationMs = scheduler.peekNext(now).track.durationMs;
+      } catch {
+        nextTrackDurationMs = null;
+      }
       return {
         now,
-        currentTrack: snap.trackId ? (trackById.get(snap.trackId) ?? null) : null,
+        currentTrack: current,
         recentTracks: snap.recentTracks,
         recentAired,
+        trackRemainingMs: current ? Math.max(0, snap.trackDurationMs - snap.positionMs) : null,
+        trackDurationMs: current ? snap.trackDurationMs : null,
+        nextTrackDurationMs,
       };
     },
   });
+  function maybePrefetch(track: Track | null | undefined): void {
+    if (!track) return;
+    if (!deps.runtimeConfig.engine.voiceEnabled) return;
+    if (engine.getSnapshot(clock.now()).listeners <= 0) return;
+    producer.prefetch(track);
+  }
 
   const wss = new WebSocketServer({ noServer: true });
 
@@ -218,6 +245,11 @@ export function createRadio(deps: RadioDeps): Radio {
     const decision = scheduler.pickNext(at);
     scheduler.reportStarted(decision.track.id, at);
     engine.onTrackStarted(decision.track, at);
+    try {
+      scheduler.peekNext(at);
+    } catch {
+      /* 曲库空时 peek 失败不影响本曲 */
+    }
     consecutiveFailures = 0; // 成功播出一首，失败计数清零（「连续」语义）
     if (currentPlayId !== null) {
       deps.store.endPlay(currentPlayId, at);
@@ -231,6 +263,7 @@ export function createRadio(deps: RadioDeps): Radio {
     console.log(
       `[radio] ▶ ${decision.track.title}（${decision.track.styles.join('/')}，${Math.round(decision.track.durationMs / 1000)}s）`,
     );
+    maybePrefetch(decision.track);
     broadcast({
       type: 'track',
       trackId: decision.track.id,
@@ -246,38 +279,47 @@ export function createRadio(deps: RadioDeps): Radio {
     replyTo?: Array<{ id: string; body: string }>;
     ackTitle?: string;
   }): Promise<void> {
-    const produced = await producer.produce(plan);
-    if (!produced) {
-      engine.onSegmentFailed(plan.id);
-      return;
-    }
-    if (!engine.onSegmentReady(produced.id, produced.durationMs)) {
-      console.warn(
-        `[radio] ⏭️ ${produced.kind}错过播出时机已放弃（沉默保底，非播出）：${produced.text}`,
-      );
-      return;
-    }
-    if (produced.songTrackId) {
-      const hit = trackById.get(produced.songTrackId);
-      if (hit) {
-        engine.onRequestAck(hit.title);
-        scheduler.queueTrack(hit.id);
-        console.log(`[radio] 🎵 点歌受理：《${hit.title}》（${hit.styles.join('/')}）→ 预告后插播`);
+    const ac = new AbortController();
+    inflight.set(plan.id, ac);
+    try {
+      const produced = await producer.produce(plan, ac.signal);
+      if (ac.signal.aborted) return;
+      if (!produced) {
+        engine.onSegmentFailed(plan.id);
+        return;
       }
+      if (!engine.onSegmentReady(produced.id, produced.durationMs)) {
+        console.warn(
+          `[radio] ⏭️ ${produced.kind}错过播出时机已放弃（沉默保底，非播出）：${produced.text}`,
+        );
+        return;
+      }
+      if (produced.songTrackId) {
+        const hit = trackById.get(produced.songTrackId);
+        if (hit) {
+          engine.onRequestAck(hit.title);
+          scheduler.queueTrack(hit.id);
+          console.log(
+            `[radio] 🎵 点歌受理：《${hit.title}》（${hit.styles.join('/')}）→ 预告后插播`,
+          );
+        }
+      }
+      voiceSegments.set(plan.id, {
+        id: produced.id,
+        kind: produced.kind,
+        text: produced.text,
+        audioPath: produced.audioPath,
+        durationMs: produced.durationMs,
+        startedAt: 0,
+        songTrackId: produced.songTrackId,
+        replyToIds: plan.replyTo?.map((m) => m.id),
+      });
+      console.log(
+        `[radio] 💬 ${produced.kind}（${(produced.durationMs / 1000).toFixed(1)}s${produced.cached ? '，缓存命中' : ''}）：${produced.text}`,
+      );
+    } finally {
+      inflight.delete(plan.id);
     }
-    voiceSegments.set(plan.id, {
-      id: produced.id,
-      kind: produced.kind,
-      text: produced.text,
-      audioPath: produced.audioPath,
-      durationMs: produced.durationMs,
-      startedAt: 0,
-      songTrackId: produced.songTrackId,
-      replyToIds: plan.replyTo?.map((m) => m.id),
-    });
-    console.log(
-      `[radio] 💬 ${produced.kind}（${(produced.durationMs / 1000).toFixed(1)}s${produced.cached ? '，缓存命中' : ''}）：${produced.text}`,
-    );
   }
 
   /** L1 记忆策展（P3）：播出后提取值得保留的节目事实。失败静默。 */
@@ -310,6 +352,11 @@ export function createRadio(deps: RadioDeps): Radio {
             replyTo: event.replyTo,
             ackTitle: event.ackTitle,
           });
+          break;
+        }
+        case 'segment-dropped': {
+          inflight.get(event.id)?.abort();
+          inflight.delete(event.id);
           break;
         }
         case 'play-segment': {
@@ -451,6 +498,10 @@ export function createRadio(deps: RadioDeps): Radio {
       );
       // 引擎热开关：关闭时丢弃在途段落立即静默；开启时恢复规划
       engine.setVoiceEnabled(settings.enabled);
+      if (!settings.enabled) {
+        for (const ac of inflight.values()) ac.abort();
+        inflight.clear();
+      }
       // 语速变了：重建 TTS 客户端（下次合成即新值）
       currentTts = deps.ttsFactory();
       console.log(
@@ -526,6 +577,7 @@ export function createRadio(deps: RadioDeps): Radio {
         startedAt: unfinished.startedAt,
         durationMs: resumeTrack.durationMs,
       });
+      maybePrefetch(resumeTrack);
     } else {
       // 上次播完或已过时：正常开播
       if (unfinished && resumeTrack) {
@@ -597,6 +649,7 @@ export function createRadio(deps: RadioDeps): Radio {
         startedAt: now,
         durationMs: decision.track.durationMs,
       });
+      maybePrefetch(decision.track);
     } catch {
       // 曲库耗尽：信号丢失（ER-005）
       console.error('[radio] 📡 曲库无可播放曲目：信号丢失（ER-005）');
@@ -646,6 +699,10 @@ export function createRadio(deps: RadioDeps): Radio {
     wss.on('connection', (ws) => {
       // WS 连接数即在场人数（技术设计 §4.7）
       engine.onListenersChanged(wss.clients.size);
+      if (wss.clients.size > 0) {
+        const snap = engine.getSnapshot(clock.now());
+        if (snap.trackId) maybePrefetch(trackById.get(snap.trackId));
+      }
       // 调频进入：立即补发当前状态
       ws.send(JSON.stringify({ type: 'sync', state: getState() }));
       ws.on('message', (raw) => {

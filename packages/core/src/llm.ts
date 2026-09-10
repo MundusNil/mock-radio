@@ -1,6 +1,7 @@
 /** LLM 端口：core 不知道协议细节；实现见 adapters/llm（D7：OpenAI 兼容通吃） */
 
 import type { SegmentPrompt } from './context';
+import type { DeskNotes, DeskResearchBrief } from './desk';
 import type { SpeechLine } from './speech';
 import type { MemoryKind } from './types';
 
@@ -25,7 +26,12 @@ export interface MemoryExtraction {
 
 export interface LlmClient {
   /** 生成一段播报文案；失败抛错，由组装层决定静默降级（沉默保底） */
-  generateSegment(prompt: SegmentPrompt): Promise<SegmentDraft>;
+  generateSegment(prompt: SegmentPrompt, signal?: AbortSignal): Promise<SegmentDraft>;
   /** 判断一段播报是否含值得长期保留的节目事实（FR-080~085：匿名策展） */
   extractMemories(segmentText: string): Promise<MemoryExtraction[]>;
+  /**
+   * 开口前的案头检索（曲目开播时预取）。失败由调用方当空笔记。
+   * 未实现则视为无案头。
+   */
+  researchDesk?(brief: DeskResearchBrief, signal?: AbortSignal): Promise<DeskNotes>;
 }

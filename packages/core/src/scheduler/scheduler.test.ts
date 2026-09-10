@@ -50,6 +50,30 @@ describe('scheduler · 选曲', () => {
   });
 });
 
+describe('scheduler · peekNext', () => {
+  it('peekNext 钉住下一首，pickNext 取出同一首', () => {
+    const s = createScheduler({
+      tracks: [T('a', ['cafe']), T('b', ['cafe']), T('c', ['cafe'])],
+      config: DEFAULT_SCHEDULER_CONFIG,
+      rng: fixed(0),
+    });
+    const peeked = s.peekNext(0);
+    expect(s.pickNext(0).track.id).toBe(peeked.track.id);
+  });
+
+  it('peekNext 不消耗点歌队列', () => {
+    const s = createScheduler({
+      tracks: [T('a', ['cafe']), T('b', ['cafe'])],
+      config: DEFAULT_SCHEDULER_CONFIG,
+      rng: fixed(0.5),
+    });
+    s.queueTrack('b');
+    expect(s.peekNext(0).track.id).toBe('b');
+    expect(s.peekNext(0).track.id).toBe('b');
+    expect(s.pickNext(0).track.id).toBe('b');
+  });
+});
+
 describe('scheduler · 时段权重（FR-020）', () => {
   const boostConfig = {
     ...DEFAULT_SCHEDULER_CONFIG,

@@ -3,6 +3,7 @@ import {
   clipSpokenText,
   groupSpeechParts,
   joinLinesText,
+  maxCharsForRemaining,
   normalizeSpeechLines,
   type SpeechLine,
 } from './speech';
@@ -78,7 +79,7 @@ describe('normalizeSpeechLines', () => {
   });
 });
 
-describe('clipSpokenText', () => {
+describe('clipSpokenText · 按句收口', () => {
   it('按句丢弃超出上限的尾巴，不切半句', () => {
     expect(clipSpokenText('一二三四五。六七八九十。十一十二十三。', 12)).toBe(
       '一二三四五。六七八九十。',
@@ -87,6 +88,14 @@ describe('clipSpokenText', () => {
 
   it('第一句就超长才硬切', () => {
     expect(clipSpokenText('一二三四五六七八九十', 5)).toBe('一二三四五');
+  });
+});
+
+describe('maxCharsForRemaining', () => {
+  it('剩余时间不够时按 4 字/秒收，但不短于 24 字', () => {
+    expect(maxCharsForRemaining(8_000, 180)).toBe(32);
+    expect(maxCharsForRemaining(4_000, 180)).toBe(24);
+    expect(maxCharsForRemaining(60_000, 180)).toBe(180);
   });
 });
 

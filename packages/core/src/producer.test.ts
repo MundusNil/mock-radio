@@ -269,6 +269,61 @@ describe('段落生产 · 逐句韵律', () => {
   });
 });
 
+describe('段落生产 · 剩余预算', () => {
+  it('本曲剩余不够时按钟收字，不把整段独白交给 TTS', async () => {
+    let spoken = '';
+    const producer = createSegmentProducer({
+      llm: llmOk('一二三四五六七八九十。然后这一句太长会被整句丢掉。'),
+      tts: {
+        synthesize: async (input) => {
+          spoken = typeof input === 'string' ? input : input.map((l) => l.text).join('');
+          return { filePath: '/tmp/seg.mp3', durationMs: 2000, cached: false };
+        },
+      },
+      persona: PERSONA,
+      stationName: '梦可电台',
+      hostName: '梦可',
+      retrieveMemories: () => [],
+      tracks: [track],
+      maxSegmentChars: 180,
+      view: () => ({
+        now: Date.UTC(2026, 7, 19, 12, 0, 0),
+        currentTrack: track,
+        recentTracks: [],
+        trackRemainingMs: 5_000,
+      }),
+    });
+
+    const produced = await producer.produce({ id: 'seg-clock', kind: 'interlude' });
+    expect(produced?.text).toBe('一二三四五六七八九十。');
+    expect(spoken).toBe('一二三四五六七八九十。');
+  });
+
+  it('外部 abort 时立刻放弃，不调用 TTS', async () => {
+    const ac = new AbortController();
+    let ttsCalls = 0;
+    const producer = producerOf({
+      llm: {
+        generateSegment: async () => {
+          ac.abort();
+          return { text: '今晚风很轻。', songRequest: null };
+        },
+        extractMemories: async () => [],
+      },
+      tts: {
+        synthesize: async () => {
+          ttsCalls += 1;
+          return { filePath: '/tmp/seg.mp3', durationMs: 4200, cached: false };
+        },
+      },
+    });
+
+    const produced = await producer.produce({ id: 'seg-abort', kind: 'interlude' }, ac.signal);
+    expect(produced).toBeNull();
+    expect(ttsCalls).toBe(0);
+  });
+});
+
 describe('段落生产 · 点歌匹配', () => {
   it('reply 命中曲库标题时带上 songTrackId', async () => {
     const producer = producerOf({
@@ -310,5 +365,114 @@ describe('段落生产 · 点歌匹配', () => {
 
     expect(produced?.songTrackId).toBeNull();
     expect(produced?.text).toContain('库里没有');
+  });
+});
+
+describe('段落生产 · 案头', () => {
+  it('prefetch 笔记写入开口，同一曲不重搜', async () => {
+    let researchCalls = 0;
+    let user = '';
+    const producer = createSegmentProducer({
+      llm: {
+        generateSegment: async (prompt) => {
+          user = prompt.user;
+          return { text: '标题画面挂一整晚就是为了听这个循环。', songRequest: null };
+        },
+        extractMemories: async () => [],
+        researchDesk: async (brief) => {
+          researchCalls += 1;
+          return {
+            trackId: brief.trackId,
+            queries: brief.queries,
+            notes: [{ lane: 'community', text: 'Steam 有人挂标题画面一整晚' }],
+          };
+        },
+      },
+      tts: ttsOk,
+      persona: PERSONA,
+      stationName: '梦可电台',
+      hostName: '梦可',
+      retrieveMemories: () => [],
+      tracks: [track],
+      view: () => ({
+        now: Date.UTC(2026, 7, 19, 12, 0, 0),
+        currentTrack: track,
+        recentTracks: [],
+      }),
+    });
+    producer.prefetch(track);
+    const first = await producer.produce({ id: 'seg-desk-1', kind: 'interlude' });
+    expect(first?.text).toContain('标题画面');
+    expect(user).toContain('Steam 有人挂标题画面一整晚');
+    expect(user).not.toContain('开口这一次不要搜');
+    await producer.produce({ id: 'seg-desk-2', kind: 'interlude' });
+    expect(researchCalls).toBe(1);
+  });
+
+  it('案头失败当空笔记，开口仍走', async () => {
+    let user = '';
+    const producer = createSegmentProducer({
+      llm: {
+        generateSegment: async (prompt) => {
+          user = prompt.user;
+          return { text: '鼓点一直压着，不催。', songRequest: null };
+        },
+        extractMemories: async () => [],
+        researchDesk: async () => {
+          throw new Error('LLM HTTP 502');
+        },
+      },
+      tts: ttsOk,
+      persona: PERSONA,
+      stationName: '梦可电台',
+      hostName: '梦可',
+      retrieveMemories: () => [],
+      tracks: [track],
+      view: () => ({
+        now: Date.UTC(2026, 7, 19, 12, 0, 0),
+        currentTrack: track,
+        recentTracks: [],
+      }),
+      onError: () => undefined,
+    });
+    const produced = await producer.produce({ id: 'seg-desk-miss', kind: 'interlude' });
+    expect(produced?.text).toContain('鼓点一直压着');
+    expect(user).toContain('案头这次没摸到能站住的条目');
+  });
+
+  it('空笔记不写入缓存，下次开口会再搜', async () => {
+    let researchCalls = 0;
+    const producer = createSegmentProducer({
+      llm: {
+        generateSegment: async () => ({ text: '鼓点一直压着，不催。', songRequest: null }),
+        extractMemories: async () => [],
+        researchDesk: async (brief) => {
+          researchCalls += 1;
+          if (researchCalls === 1) {
+            return { trackId: brief.trackId, queries: brief.queries, notes: [] };
+          }
+          return {
+            trackId: brief.trackId,
+            queries: brief.queries,
+            notes: [{ lane: 'work', text: 'Jill 在吧台开班前放' }],
+          };
+        },
+      },
+      tts: ttsOk,
+      persona: PERSONA,
+      stationName: '梦可电台',
+      hostName: '梦可',
+      retrieveMemories: () => [],
+      tracks: [track],
+      view: () => ({
+        now: Date.UTC(2026, 7, 19, 12, 0, 0),
+        currentTrack: track,
+        recentTracks: [],
+      }),
+    });
+    await producer.produce({ id: 'seg-empty-1', kind: 'interlude' });
+    expect(researchCalls).toBe(1);
+    await producer.produce({ id: 'seg-empty-2', kind: 'interlude' });
+    expect(researchCalls).toBe(2);
   });
 });

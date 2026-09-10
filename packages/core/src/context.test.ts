@@ -34,12 +34,11 @@ describe('buildSegmentPrompt', () => {
     expect(p.system).not.toContain('{STATION_NAME}');
   });
 
-  it('常规串场把曲目当搜索来源，不把时段、moodHint 写成开口指令', () => {
+  it('常规串场把曲目当听感来源，开口不再叫模型现场搜', () => {
     const p = buildSegmentPrompt(ctx);
     expect(p.user).toContain('《月光小径》');
     expect(p.user).toContain('歌名别当报幕念出来');
-    expect(p.user).toContain('基础背景');
-    expect(p.user).toContain('自己找一个话题');
+    expect(p.user).toContain('开口这一次不要搜');
     expect(p.user).not.toContain('《晨雾》');
     expect(p.user).not.toContain('周三');
     expect(p.user).not.toContain('渐暗');
@@ -93,15 +92,14 @@ describe('buildSegmentPrompt', () => {
     expect(p.user).toContain('说完再停');
   });
 
-  it('搜索是案头准备：摸清背景后自己找话题，禁止交代「我查了」', () => {
+  it('搜索是案头准备：开口不再搜，禁止交代「我查了」', () => {
     const p = buildSegmentPrompt(ctx);
     expect(p.system).toContain('你是主持人，不是检索助手');
-    expect(p.system).toContain('基础背景搜清楚');
-    expect(p.system).toContain('自己挑一个话题');
+    expect(p.system).toContain('开口这一次不要再搜');
+    expect(p.system).toContain('从笔记里只挑一条具体的事');
     expect(p.system).toContain('我刚才查了');
     expect(p.system).toContain('我搜了一下');
     expect(p.system).toContain('听众应觉得你懂这档节目');
-    expect(p.user).toContain('别说你查过');
   });
 
   it('系统给冻结口吻样本，学劲儿不学情节', () => {
@@ -141,6 +139,33 @@ describe('buildSegmentPrompt', () => {
     const p = buildSegmentPrompt({ ...ctx, kind: 'interlude', currentTrack: null });
     expect(p.user).not.toContain('《月光小径》');
     expect(p.user).not.toContain('换曲的间隙');
+  });
+
+  it('导播钟写入 user，精确到秒，禁止念给听众', () => {
+    const p = buildSegmentPrompt({
+      ...ctx,
+      trackRemainingMs: 87_400,
+      trackDurationMs: 240_000,
+      nextTrackDurationMs: 181_000,
+    });
+    expect(p.user).toContain('导播钟：这首还剩 87 秒（全长 240 秒）。');
+    expect(p.user).toContain('下一首全长 181 秒。');
+    expect(p.user).toContain('不要把秒数念给听众');
+    expect(p.system).not.toContain('导播钟');
+  });
+
+  it('有案头笔记时写入 user，只当开口材料', () => {
+    const p = buildSegmentPrompt({
+      ...ctx,
+      deskNotes: {
+        trackId: 't-moon',
+        queries: [],
+        notes: [{ lane: 'community', text: 'Steam 有人挂标题画面一整晚' }],
+      },
+    });
+    expect(p.user).toContain('[玩家社区] Steam 有人挂标题画面一整晚');
+    expect(p.user).toContain('只挑一条具体的事来说这首');
+    expect(p.user).not.toContain('开口这一次不要搜');
   });
 });
 

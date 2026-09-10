@@ -119,6 +119,18 @@ export function clipSpokenText(text: string, maxChars: number): string {
   return cleaned.slice(0, maxChars);
 }
 
+/** 口播约 4 字/秒。剩余时间不够时按钟收字数，最短 24 字以免只剩半句。 */
+const CHARS_PER_SEC = 4;
+const MIN_CLOCK_CHARS = 24;
+
+export function maxCharsForRemaining(remainingMs: number, kindCap: number): number {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return kindCap;
+  const fromClock = Math.floor((remainingMs / 1000) * CHARS_PER_SEC);
+  const bounded = Math.max(MIN_CLOCK_CHARS, fromClock);
+  if (!Number.isFinite(kindCap)) return bounded;
+  return Math.min(kindCap, bounded);
+}
+
 /**
  * 把 LLM 给的原始行清洗成可信的韵律行：
  * 去空行与标记、夹取语速与停顿、情绪归一到白名单、最后一句不留停顿、总字数截断。

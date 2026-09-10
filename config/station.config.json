@@ -13,7 +13,7 @@
     "topicCooldownMs": 2400000,
     "topicChance": 0.15,
     "pendingTimeoutMs": 120000,
-    "speakWhenAlone": false,
+    "produceBudgetMs": 45000,
     "nodeWindow": {
       "minIntoTrackMs": 20000,
       "minBeforeTrackEndMs": 10000
@@ -42,12 +42,12 @@
     "apiKeyEnv": "ARK_API_KEY",
     "temperature": 0.8,
     "webSearch": true,
-    "timeoutMs": 120000,
+    "timeoutMs": 60000,
     "maxTokens": 2500,
     "maxSegmentChars": 180,
     "maxSegmentCharsByKind": {
       "station_id": 40,
-      "interlude": 180,
+      "interlude": 120,
       "topic": 400,
       "reply": 180,
       "request_ack": 80

@@ -43,7 +43,7 @@ export interface LlmConfig {
   temperature: number;
   /** 模型内置联网搜索（豆包/方舟支持；DeepSeek 不支持） */
   webSearch: boolean;
-  /** 单次请求超时（ms）；推理+搜索模型需要更长 */
+  /** 单次请求超时（ms）；必须短于 pendingTimeout，给 TTS 留窗口。思考模型口播实测可近 50s。 */
   timeoutMs: number;
   /** 单次生成的 token 上限（长篇口播要放宽，否则会被截断成半句话） */
   maxTokens: number;
@@ -169,12 +169,12 @@ export function loadStationConfig(
       apiKeyEnv: 'ARK_API_KEY',
       temperature: 0.8,
       webSearch: true,
-      timeoutMs: 120_000,
+      timeoutMs: 60_000,
       maxTokens: 2500,
       maxSegmentChars: 180,
       maxSegmentCharsByKind: {
         station_id: 40,
-        interlude: 180,
+        interlude: 120,
         topic: 400,
         reply: 180,
         request_ack: 80,

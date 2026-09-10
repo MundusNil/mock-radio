@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "AI 氛围电台：音乐永远是主体，梦可按自己的节奏轻轻串场。",
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=22"
   },

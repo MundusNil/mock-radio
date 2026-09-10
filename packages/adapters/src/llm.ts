@@ -1,5 +1,7 @@
 /** OpenAI 兼容 LLM 客户端（D7：DeepSeek / Qwen / GLM / Kimi 通吃，换供应商=改配置） */
 import type {
+  DeskNotes,
+  DeskResearchBrief,
   LlmClient,
   MemoryExtraction,
   SegmentDraft,
@@ -7,9 +9,11 @@ import type {
   SpeechLine,
 } from '@mock-radio/core';
 import {
+  buildDeskResearchPrompt,
   joinLinesText,
   MEMORY_EXTRACTION_SYSTEM,
   normalizeSpeechLines,
+  parseDeskNotes,
   parseMemoryExtraction,
 } from '@mock-radio/core';
 
@@ -19,9 +23,11 @@ export interface OpenAiCompatibleOptions {
   model: string;
   temperature?: number;
   timeoutMs?: number;
+  /** 案头检索超时。占曲目时间，默认 90s；开口仍走 timeoutMs。 */
+  deskTimeoutMs?: number;
   /** 网络失败时的重试次数 */
   retries?: number;
-  /** 开启模型内置联网搜索（方舟 web_search；豆包等支持，DeepSeek 不支持）。只用于 generateSegment；extractMemories 强制关闭。 */
+  /** 开启模型内置联网搜索（方舟 web_search）。只用于 researchDesk；generateSegment / extractMemories 强制关闭。 */
   webSearch?: boolean;
   /** 单次生成的最大 token 数（长篇口播需要放宽） */
   maxTokens?: number;
@@ -107,6 +113,7 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
     model,
     temperature = 0.8,
     timeoutMs = 30_000,
+    deskTimeoutMs = 90_000,
     retries = 1,
     webSearch = false,
     // 口播按纯文本解码；记忆提取仍走 JSON
@@ -115,10 +122,18 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
 
   async function chatOnce(
     messages: Array<{ role: 'system' | 'user'; content: string }>,
-    opts: { webSearch?: boolean; jsonObject?: boolean } = {},
+    opts: {
+      webSearch?: boolean;
+      jsonObject?: boolean;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      disableThinking?: boolean;
+    } = {},
   ): Promise<string> {
     const useSearch = opts.webSearch ?? webSearch;
     const jsonObject = opts.jsonObject === true;
+    const timeout = AbortSignal.timeout(opts.timeoutMs ?? timeoutMs);
+    const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -132,8 +147,9 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
         max_tokens: maxTokens,
         ...(jsonObject ? { response_format: { type: 'json_object' } } : {}),
         ...(useSearch ? { web_search: { enable: true } } : {}),
+        ...(opts.disableThinking ? { thinking: { type: 'disabled' } } : {}),
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -148,7 +164,7 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
   }
 
   return {
-    async generateSegment(prompt: SegmentPrompt): Promise<SegmentDraft> {
+    async generateSegment(prompt: SegmentPrompt, extra?: AbortSignal): Promise<SegmentDraft> {
       const messages = [
         { role: 'system' as const, content: prompt.system },
         { role: 'user' as const, content: prompt.user },
@@ -156,10 +172,12 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
       let lastError: unknown = null;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
         try {
-          const text = await chatOnce(messages);
+          const text = await chatOnce(messages, { webSearch: false, signal: extra });
           return parseDraft(text);
         } catch (err) {
           lastError = err;
+          if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError'))
+            break;
           // 只有网络/5xx 类错误值得重试；4xx 不重试
           if (err instanceof Error && /HTTP 4\d\d/.test(err.message)) break;
         }
@@ -179,6 +197,21 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
         // 提取失败不阻塞节目（策展失败 = 本次不记，安全）
         return [];
       }
+    },
+
+    async researchDesk(brief: DeskResearchBrief, extra?: AbortSignal): Promise<DeskNotes> {
+      if (!webSearch) {
+        return { trackId: brief.trackId, queries: brief.queries, notes: [] };
+      }
+      const prompt = buildDeskResearchPrompt(brief);
+      const text = await chatOnce(
+        [
+          { role: 'system' as const, content: prompt.system },
+          { role: 'user' as const, content: prompt.user },
+        ],
+        { webSearch: true, signal: extra, timeoutMs: deskTimeoutMs, disableThinking: true },
+      );
+      return parseDeskNotes(text, brief.trackId, brief.queries);
     },
   };
 }

@@ -24,6 +24,8 @@ export interface SchedulerOptions {
 
 export interface Scheduler {
   pickNext(now: number): SchedulerDecision;
+  /** 锁住下一首（只取时长给导播钟；不把歌名交给文案模型） */
+  peekNext(now: number): SchedulerDecision;
   reportStarted(trackId: string, at: number): void;
   /** 点歌队列（P2，FR-064）：受理的点歌优先播出；没有「点歌模式」概念（FR-066） */
   queueTrack(trackId: string): void;
@@ -72,19 +74,18 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return 2 ** (-playsSince / halfLife);
   }
 
-  function pickNext(now: number): SchedulerDecision {
+  /** 已 peek 但尚未 pick 的随机池结果；点歌队列不走这里 */
+  let held: SchedulerDecision | null = null;
+
+  function enabledTracks(): Track[] {
+    return tracks.filter((t) => t.enabled && !blacklisted.has(t.id));
+  }
+
+  function drawPool(now: number): SchedulerDecision {
     pruneLog(now);
-    const enabled = tracks.filter((t) => t.enabled && !blacklisted.has(t.id));
+    const enabled = enabledTracks();
     if (enabled.length === 0) {
       throw new Error('曲库为空或全部禁用/拉黑：无法选曲（ER-005 由组装层兜底）');
-    }
-    // 点歌队列优先（FR-064）：听众明确要求，跳过随机权重与滑窗（不标记放宽）
-    const requested = requestQueue.shift();
-    if (requested) {
-      const track = enabled.find((t) => t.id === requested);
-      if (track) {
-        return { track, relaxedNoRepeat: false };
-      }
     }
     const inWindow = new Set(
       [...lastStartedAt.entries()]
@@ -95,7 +96,6 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     const pool = fresh.length > 0 ? fresh : enabled;
     const relaxed = fresh.length === 0;
 
-    // 加权轮盘赌
     const weights = pool.map((t) => styleWeight(t, now) * recencyPenalty(t));
     const total = weights.reduce((a, b) => a + b, 0);
     let r = rng() * total;
@@ -113,6 +113,43 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     throw new Error('选曲池为空：不可达（enabled 非空已保证）');
   }
 
+  function peekQueued(): Track | null {
+    const enabled = enabledTracks();
+    for (const id of requestQueue) {
+      const track = enabled.find((t) => t.id === id);
+      if (track) return track;
+    }
+    return null;
+  }
+
+  function peekNext(now: number): SchedulerDecision {
+    pruneLog(now);
+    const queued = peekQueued();
+    if (queued) return { track: queued, relaxedNoRepeat: false };
+    if (held === null) held = drawPool(now);
+    return held;
+  }
+
+  function pickNext(now: number): SchedulerDecision {
+    pruneLog(now);
+    const enabled = enabledTracks();
+    if (enabled.length === 0) {
+      throw new Error('曲库为空或全部禁用/拉黑：无法选曲（ER-005 由组装层兜底）');
+    }
+    const requested = requestQueue.shift();
+    if (requested) {
+      held = null;
+      const track = enabled.find((t) => t.id === requested);
+      if (track) return { track, relaxedNoRepeat: false };
+    }
+    if (held) {
+      const next = held;
+      held = null;
+      return next;
+    }
+    return drawPool(now);
+  }
+
   function reportStarted(trackId: string, at: number): void {
     lastStartedAt.set(trackId, at);
     playLog.push({ trackId, at });
@@ -125,7 +162,8 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
   function blacklistTrack(trackId: string): void {
     blacklisted.add(trackId);
+    if (held?.track.id === trackId) held = null;
   }
 
-  return { pickNext, reportStarted, queueTrack, blacklistTrack };
+  return { pickNext, peekNext, reportStarted, queueTrack, blacklistTrack };
 }

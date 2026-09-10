@@ -15,5 +15,5 @@ export interface TtsClient {
    * 传 SpeechLine[]：每句自带语速 / 情绪 / 停顿，供应商按需消费——
    * 不支持韵律的供应商（如 edge-tts）自动降级为纯文本拼接，不会报错。
    */
-  synthesize(input: string | SpeechLine[]): Promise<SynthesizedSpeech>;
+  synthesize(input: string | SpeechLine[], signal?: AbortSignal): Promise<SynthesizedSpeech>;
 }

@@ -25,7 +25,9 @@ export type EngineEvent =
       ackTitle?: string;
     }
   /** 在自然节点播出已就绪的段落（组装层：广播 voice + 播放音频） */
-  | { type: 'play-segment'; segmentId: string; startedAt: number; durationMs: number };
+  | { type: 'play-segment'; segmentId: string; startedAt: number; durationMs: number }
+  /** 在途段落被丢弃：组装层 abort 生产，避免曲目结束后才合成完 */
+  | { type: 'segment-dropped'; id: string; reason: 'timeout' | 'track-ended' };
 
 export interface EngineSnapshot {
   trackId: string | null;
@@ -55,7 +57,7 @@ export interface Engine {
   /** 每秒调用；返回本 tick 的意图事件（幂等：状态转换的那一 tick 才发） */
   tick(now: number): EngineEvent[];
   onTrackStarted(track: Track, at: number): void;
-  /** 段落就绪上报：返回是否被引擎接受。错过曲目边界/超时已被丢弃（60% 预取，沉默保底）时返回 false，组装层不得再入库/误报播出 */
+  /** 段落就绪上报：返回是否被引擎接受。错过曲目边界/超时已被丢弃时返回 false，组装层不得再入库/误报播出 */
   onSegmentReady(id: string, durationMs: number): boolean;
   onSegmentFailed(id: string): void;
   onListenersChanged(count: number): void;
@@ -130,6 +132,22 @@ export function createEngine(options: EngineOptions): Engine {
     return listeners > 0 || config.speakWhenAlone;
   }
 
+  function remainingMs(now: number): number | null {
+    if (!currentTrack) return null;
+    return trackStartedAt + currentTrack.durationMs - now;
+  }
+
+  function canAffordActiveTalk(now: number): boolean {
+    const remaining = remainingMs(now);
+    return remaining != null && remaining >= config.produceBudgetMs;
+  }
+
+  function dropPending(events: EngineEvent[], reason: 'timeout' | 'track-ended'): void {
+    if (!pending) return;
+    events.push({ type: 'segment-dropped', id: pending.id, reason });
+    pending = null;
+  }
+
   function tick(now: number): EngineEvent[] {
     const events: EngineEvent[] = [];
 
@@ -156,11 +174,11 @@ export function createEngine(options: EngineOptions): Engine {
 
     // 组装层无响应的段落：静默丢弃，节奏照常（ER 哲学）
     if (pending && now - pending.plannedAt > config.pendingTimeoutMs) {
-      pending = null;
+      dropPending(events, 'timeout');
     }
-    // 60% 预取：曲目结束时仍未就绪 → 放弃该段落（来不及则沉默保底）
+    // 曲目结束时仍未就绪 → 放弃该段落（来不及则沉默保底）
     if (trackEndedThisTick && pending && pending.state === 'planned') {
-      pending = null;
+      dropPending(events, 'track-ended');
     }
 
     // 规划：优先级——request_ack > 留言 force > 留言 prefer > 台呼 > next_talk_due
@@ -236,8 +254,9 @@ export function createEngine(options: EngineOptions): Engine {
         events.push({ type: 'plan-segment', id: pending.id, kind: 'station_id' });
       } else if (
         currentTrack !== null &&
+        canAffordActiveTalk(now) &&
         (now >= nextTalkDue ||
-          (now >= trackStartedAt + currentTrack.durationMs * 0.6 &&
+          ((remainingMs(now) ?? Number.POSITIVE_INFINITY) <= config.produceBudgetMs &&
             nextTalkDue <= trackStartedAt + currentTrack.durationMs))
       ) {
         const topicEligible = now - lastTopicAt >= config.topicCooldownMs;

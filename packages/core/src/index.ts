@@ -1,5 +1,6 @@
 export * from './config';
 export * from './context';
+export * from './desk';
 export * from './engine/engine';
 export * from './llm';
 export * from './memory';

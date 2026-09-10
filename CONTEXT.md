@@ -24,6 +24,10 @@ _Avoid_: 消息, 回复, clip, utterance
 把一次 `plan-segment` 变成可播出的语音（上下文 → LLM → TTS），失败则 沉默保底。
 _Avoid_: 生成管线, pipeline, assembler, generateSegment
 
+**案头**:
+曲目开播时的检索笔记（作品场景 / 玩家社区 / 乐评）。占用音乐时间预取；开口只从笔记写，不再联网。不是 L1 记忆，不是世界书。
+_Avoid_: 世界书, RAG, 搜索结果播报
+
 **自然节点**:
 允许开口的时机：曲目边界或中段安全窗口（前奏 / 尾奏保护）。
 _Avoid_: 打断点, cue point

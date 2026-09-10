@@ -36,7 +36,7 @@ export type SegmentKind =
   | 'reply' // 回应留言，15~45s
   | 'request_ack'; // 点歌受理 / 婉拒 / 预告，10~20s
 
-export type SegmentStatus = 'planned' | 'generating' | 'ready' | 'aired' | 'dropped'; // 60% 预取规则：来不及则放弃，沉默保底
+export type SegmentStatus = 'planned' | 'generating' | 'ready' | 'aired' | 'dropped'; // 来不及则放弃，沉默保底
 
 /** 主播播出的一段话（segments 表） */
 export interface Segment {

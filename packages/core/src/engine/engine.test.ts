@@ -104,14 +104,14 @@ describe('engine · 故障哲学（ER-001~003）', () => {
     expect(again[0]).toMatchObject({ type: 'plan-segment' });
   });
 
-  it('组装层无响应超过 60 秒：静默丢弃挂起段落，节目不卡死', () => {
+  it('组装层无响应超过 pendingTimeout：静默丢弃挂起段落，节目不卡死', () => {
     const e = createEngine({ config: cfg, rng: fixed(0) });
     e.onTrackStarted(T('a'), 0);
-    e.tick(300_000); // plan（不回调 ready/failed，模拟组装层卡死）
-    expect(e.tick(340_000)).toEqual([]); // 超时前：等待
-    // 300s + 60s = 360s 后丢弃；下一次 due = 600s
-    expect(e.tick(361_000)).toEqual([]);
-    expect(e.tick(600_000)).toHaveLength(1); // 节奏恢复
+    const [plan] = e.tick(300_000);
+    if (plan?.type !== 'plan-segment') throw new Error('expect plan event');
+    expect(e.tick(419_000)).toEqual([]);
+    expect(e.tick(421_000)).toEqual([{ type: 'segment-dropped', id: plan.id, reason: 'timeout' }]);
+    expect(e.tick(600_000)).toHaveLength(1);
   });
 });
 
@@ -138,7 +138,11 @@ describe('engine · 最小间隔与 topic 升级', () => {
     // rng 序列：首曲 interval 采样 → topic 判定 → 节奏重采样
     const e = createEngine({ config: topicCfg, rng: seq(0, 0, 0) });
     e.onTrackStarted(T('a'), 0);
-    expect(e.tick(300_000)[0]).toMatchObject({ type: 'plan-segment', kind: 'topic' });
+    const [first] = e.tick(300_000);
+    expect(first).toMatchObject({ type: 'plan-segment', kind: 'topic' });
+    if (first?.type !== 'plan-segment') throw new Error('expect plan');
+    e.onSegmentReady(first.id, 15_000);
+    e.tick(301_000);
     // 冷却未满（40 分钟），第二次仍是 interlude
     expect(e.tick(600_000)[0]).toMatchObject({ type: 'plan-segment', kind: 'interlude' });
   });
@@ -179,9 +183,9 @@ describe('engine · 串场节奏（FR-031）', () => {
     if (plan?.type !== 'plan-segment') throw new Error('expect plan event');
     e.onSegmentReady(plan.id, 15_000);
     e.tick(301_000); // play
-    // due=600s 落在 900s 曲的后 40%，60%（540s）处提前规划
-    expect(e.tick(539_999)).toEqual([]);
-    const again = e.tick(540_000);
+    // due=600s；剩余 300s 仍够预算，到期才规划（不再按曲目 60% 预取）
+    expect(e.tick(599_000)).toEqual([]);
+    const again = e.tick(600_000);
     expect(again).toHaveLength(1);
     expect(again[0]).toMatchObject({ type: 'plan-segment', kind: 'interlude' });
   });
@@ -328,7 +332,7 @@ describe('engine · 留言 SLA 不受 minTalkGap 约束（P2 回归）', () => {
   });
 });
 
-describe('engine · 60% 预取（边界段落来不及则放弃）', () => {
+describe('engine · 剩余时间预算（来不及则放弃）', () => {
   const prefetchCfg = {
     ...DEFAULT_ENGINE_CONFIG,
     talkIntervalMs: [80_000, 80_000] as [number, number],
@@ -337,28 +341,37 @@ describe('engine · 60% 预取（边界段落来不及则放弃）', () => {
     minTalkGapMs: 0,
   };
 
-  it('开口落在本曲后 40% 时，60% 处提前规划', () => {
+  it('到期落在本曲内时，剩余降到预算才预取', () => {
     const e = createEngine({ config: prefetchCfg, rng: fixed(0) });
     e.onTrackStarted(T('a', 100_000), 0);
-    expect(e.tick(59_000)).toEqual([]);
-    const events = e.tick(60_000);
+    expect(e.tick(54_000)).toEqual([]);
+    const events = e.tick(55_000);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'plan-segment', kind: 'interlude' });
   });
 
-  it('曲目结束时仍未就绪的段落被丢弃（沉默保底）', () => {
-    const early = {
-      ...prefetchCfg,
-      talkIntervalMs: [40_000, 40_000] as [number, number],
-      pendingTimeoutMs: 120_000,
-    };
-    const e = createEngine({ config: early, rng: fixed(0) });
+  it('开口到期已越过本曲时，剩余不够也不预取', () => {
+    const e = createEngine({ config: cfg, rng: fixed(0) });
+    e.onTrackStarted(T('a', 200_000), 0);
+    expect(e.tick(155_000)).toEqual([]);
+    expect(e.tick(200_000)).toEqual([{ type: 'track-ended', trackId: 'a' }]);
+  });
+
+  it('曲目结束时未就绪的段落被丢弃并通知组装层 abort', () => {
+    const e = createEngine({ config: prefetchCfg, rng: fixed(0) });
     e.onTrackStarted(T('a', 100_000), 0);
-    const [plan] = e.tick(40_000);
+    const [plan] = e.tick(55_000);
     expect(plan).toMatchObject({ type: 'plan-segment' });
-    expect(e.tick(100_000)).toEqual([{ type: 'track-ended', trackId: 'a' }]);
+    expect(e.tick(100_000)).toEqual([
+      { type: 'track-ended', trackId: 'a' },
+      {
+        type: 'segment-dropped',
+        id: plan?.type === 'plan-segment' ? plan.id : '',
+        reason: 'track-ended',
+      },
+    ]);
     e.onTrackStarted(T('b', 100_000), 100_000);
-    const again = e.tick(101_000);
+    const again = e.tick(135_000);
     expect(again).toHaveLength(1);
     expect(again[0]).toMatchObject({ type: 'plan-segment', kind: 'interlude' });
     if (again[0]?.type === 'plan-segment' && plan?.type === 'plan-segment') {
@@ -366,18 +379,16 @@ describe('engine · 60% 预取（边界段落来不及则放弃）', () => {
     }
   });
 
-  it('就绪上报返回是否被接受：被丢弃的段落返回 false，组装层不误报播出', () => {
+  it('被丢弃的段落迟到就绪返回 false，组装层不误报播出', () => {
     const e = createEngine({ config: prefetchCfg, rng: fixed(0) });
     e.onTrackStarted(T('a', 100_000), 0);
-    const [plan] = e.tick(60_000);
+    const [plan] = e.tick(55_000);
     if (plan?.type !== 'plan-segment') throw new Error('expect plan');
-    // 引擎仍持有 → true
-    expect(e.onSegmentReady(plan.id, 15_000)).toBe(true);
-    e.tick(100_000); // 曲目结束 → planned 段被丢弃
-    e.onTrackStarted(T('b', 100_000), 100_000);
-    // 已被丢弃的段落迟到就绪 → false
+    expect(e.tick(100_000)).toEqual([
+      { type: 'track-ended', trackId: 'a' },
+      { type: 'segment-dropped', id: plan.id, reason: 'track-ended' },
+    ]);
     expect(e.onSegmentReady(plan.id, 15_000)).toBe(false);
-    // 未知 id 同样 false
     expect(e.onSegmentReady('seg-unknown', 15_000)).toBe(false);
   });
 });

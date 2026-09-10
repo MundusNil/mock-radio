@@ -17,30 +17,61 @@ import { probeDurationMs } from './ffprobe';
 
 const PROC_TIMEOUT_MS = 30_000;
 
-function runProc(cmd: string, args: string[], timeoutMs: number, cwd?: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, cwd ? { cwd } : {});
-    let stderr = '';
-    proc.stderr.on('data', (d: Buffer) => {
-      stderr += d.toString();
-    });
-    const timer = setTimeout(() => {
-      proc.kill();
-      reject(new Error(`${cmd} 超时（${timeoutMs}ms）`));
-    }, timeoutMs);
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${cmd} exit ${code}: ${stderr.slice(0, 300)}`));
-      }
-    });
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+}
+
+function mergeAbort(timeoutMs: number, extra?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return extra ? AbortSignal.any([timeout, extra]) : timeout;
+}
+
+function runProc(
+  cmd: string,
+  args: string[],
+  timeoutMs: number,
+  cwd?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  }
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const proc = spawn(cmd, args, cwd ? { cwd } : {});
+  let stderr = '';
+  let settled = false;
+  const finish = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    fn();
+  };
+  const onAbort = () => {
+    proc.kill();
+    finish(() => reject(new DOMException('The operation was aborted.', 'AbortError')));
+  };
+  proc.stderr.on('data', (d: Buffer) => {
+    stderr += d.toString();
   });
+  const timer = setTimeout(() => {
+    proc.kill();
+    finish(() => reject(new Error(`${cmd} 超时（${timeoutMs}ms）`)));
+  }, timeoutMs);
+  signal?.addEventListener('abort', onAbort, { once: true });
+  proc.on('error', (err) => {
+    finish(() => reject(err));
+  });
+  proc.on('close', (code) => {
+    if (code === 0) {
+      finish(() => resolve());
+    } else {
+      finish(() => reject(new Error(`${cmd} exit ${code}: ${stderr.slice(0, 300)}`)));
+    }
+  });
+  return promise;
 }
 
 /** 缓存文件名（哈希前 16 位）；把 provider/音色/韵律都并进 key，避免跨供应商碰撞 */
@@ -165,7 +196,8 @@ export function createEdgeTts(options: EdgeTtsOptions): TtsClient {
   const { voice, rate, cacheDir, loudnorm = true, timeoutMs = PROC_TIMEOUT_MS } = options;
 
   return {
-    synthesize(input: string | SpeechLine[]): Promise<SynthesizedSpeech> {
+    synthesize(input: string | SpeechLine[], signal?: AbortSignal): Promise<SynthesizedSpeech> {
+      throwIfAborted(signal);
       // edge-tts 不支持逐句情绪/停顿：降级为整段文本，韵律标注忽略（不报错）
       const text = typeof input === 'string' ? input : joinLinesText(normalizeSpeechLines(input));
       const hash = cacheHash([`edge:${voice}`, rate, text]);
@@ -175,6 +207,7 @@ export function createEdgeTts(options: EdgeTtsOptions): TtsClient {
         loudnorm,
         timeoutMs,
         produceParts: async (pathsFor) => {
+          throwIfAborted(signal);
           const [rawPath] = pathsFor(1);
           if (!rawPath) throw new Error('edge-tts 未拿到输出路径');
           await runProc(
@@ -191,6 +224,8 @@ export function createEdgeTts(options: EdgeTtsOptions): TtsClient {
               rawPath,
             ],
             timeoutMs,
+            undefined,
+            signal,
           );
           return [rawPath];
         },
@@ -283,7 +318,9 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
   async function requestPart(
     part: { text: string; speed: number; emotion?: string },
     rawPath: string,
+    extra?: AbortSignal,
   ): Promise<void> {
+    throwIfAborted(extra);
     const sep = baseUrl.includes('?') ? '&' : '?';
     const url = `${baseUrl}${sep}GroupId=${encodeURIComponent(groupId)}`;
     const res = await fetchImpl(url, {
@@ -311,7 +348,7 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
           channel: 1,
         },
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: mergeAbort(timeoutMs, extra),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -331,7 +368,11 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
   }
 
   return {
-    async synthesize(input: string | SpeechLine[]): Promise<SynthesizedSpeech> {
+    async synthesize(
+      input: string | SpeechLine[],
+      signal?: AbortSignal,
+    ): Promise<SynthesizedSpeech> {
+      throwIfAborted(signal);
       // 相邻同语气的句子合并成一次请求：接缝更少，也更省
       const parts = toSpeechParts(input);
       const rendered = parts.map((p) => ({
@@ -346,11 +387,12 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
         loudnorm,
         timeoutMs,
         produceParts: async (pathsFor) => {
+          throwIfAborted(signal);
           const paths = pathsFor(rendered.length);
           await mapLimit(rendered, PART_CONCURRENCY, async (part, i) => {
             const out = paths[i];
             if (!out) throw new Error('MiniMax 分片参数缺失');
-            await requestPart(part, out);
+            await requestPart(part, out, signal);
           });
           return paths;
         },
