@@ -60,11 +60,11 @@ export interface EdgeTtsProviderConfig {
 
 /** minimax 子配置（付费可选，音质更可控）；语速走 tts.speechRate 统一基准 */
 export interface MiniMaxTtsProviderConfig {
-  /** 系统音色 ID，如 Chinese (Mandarin)_Warm_Girl（温暖少女） */
+  /** 系统音色 ID，如 Chinese_wenrounvxing（温柔女性） */
   voice: string;
   /** 模型，默认 speech-2.8-hd */
   model: string;
-  /** MiniMax 合成音量 (0,10]，默认 1.5。Warm_Girl 源电平偏轻，面板 speechVolume 已到 1 */
+  /** MiniMax 合成音量 (0,10]，默认 1 */
   vol: number;
   /** 存放 API key 的环境变量名 */
   apiKeyEnv: string;
@@ -108,8 +108,8 @@ const DEFAULT_SPEECH_RATE = 0.9;
 /** 主播音量默认值（1 = 不额外衰减；前端语音轨增益的乘数） */
 const DEFAULT_SPEECH_VOLUME = 1;
 
-/** MiniMax 合成音量默认值。Warm_Girl 比温柔女性轻一档，1.5 是适度抬升 */
-const DEFAULT_MINIMAX_VOL = 1.5;
+/** MiniMax 合成音量默认值 */
+const DEFAULT_MINIMAX_VOL = 1;
 
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
@@ -192,7 +192,7 @@ export function loadStationConfig(
         ...raw.tts?.edge,
       },
       minimax: {
-        voice: 'Chinese (Mandarin)_Warm_Girl',
+        voice: 'Chinese_wenrounvxing',
         model: 'speech-2.8-hd',
         apiKeyEnv: 'MINIMAX_API_KEY',
         groupIdEnv: 'MINIMAX_GROUP_ID',

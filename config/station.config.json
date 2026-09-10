@@ -62,9 +62,9 @@
       "voice": "zh-CN-XiaoxuanNeural"
     },
     "minimax": {
-      "voice": "Chinese (Mandarin)_Warm_Girl",
+      "voice": "Chinese_wenrounvxing",
       "model": "speech-2.8-hd",
-      "vol": 1.5,
+      "vol": 1,
       "apiKeyEnv": "MINIMAX_API_KEY",
       "groupIdEnv": "MINIMAX_GROUP_ID"
     }

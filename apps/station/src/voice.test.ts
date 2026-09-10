@@ -134,33 +134,33 @@ describe('applyVoiceSettings · 写回 station.config.json + 热更新内存配�
       tts: { speechRate: 0.9, minimax: { voice: 'old', vol: 1 } },
     });
     const res = applyVoiceSettings(path, config, {
-      minimaxVoice: 'Chinese (Mandarin)_Warm_Girl',
-      minimaxVol: 1.5,
+      minimaxVoice: 'Chinese_wenrounvxing',
+      minimaxVol: 1,
     });
-    expect(res.minimaxVoice).toBe('Chinese (Mandarin)_Warm_Girl');
-    expect(res.minimaxVol).toBe(1.5);
-    expect(config.tts.minimax?.voice).toBe('Chinese (Mandarin)_Warm_Girl');
-    expect(config.tts.minimax?.vol).toBe(1.5);
+    expect(res.minimaxVoice).toBe('Chinese_wenrounvxing');
+    expect(res.minimaxVol).toBe(1);
+    expect(config.tts.minimax?.voice).toBe('Chinese_wenrounvxing');
+    expect(config.tts.minimax?.vol).toBe(1);
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as {
       tts: { minimax: { voice: string; vol: number; model: string } };
     };
-    expect(raw.tts.minimax.voice).toBe('Chinese (Mandarin)_Warm_Girl');
-    expect(raw.tts.minimax.vol).toBe(1.5);
+    expect(raw.tts.minimax.voice).toBe('Chinese_wenrounvxing');
+    expect(raw.tts.minimax.vol).toBe(1);
     expect(raw.tts.minimax.model).toBe('speech-2.8-hd');
   });
 
   it('只改语速时也会把盘上的音色灌进内存', () => {
     const path = configFile(
       JSON.stringify({
-        tts: { speechRate: 0.9, minimax: { voice: 'Chinese (Mandarin)_Warm_Girl', vol: 1.5 } },
+        tts: { speechRate: 0.9, minimax: { voice: 'Chinese_wenrounvxing', vol: 1 } },
       }),
     );
     const config = makeConfig({
       tts: { speechRate: 0.9, minimax: { voice: 'old', vol: 1 } },
     });
     applyVoiceSettings(path, config, { speechRate: 0.95 });
-    expect(config.tts.minimax?.voice).toBe('Chinese (Mandarin)_Warm_Girl');
-    expect(config.tts.minimax?.vol).toBe(1.5);
+    expect(config.tts.minimax?.voice).toBe('Chinese_wenrounvxing');
+    expect(config.tts.minimax?.vol).toBe(1);
     expect(config.tts.speechRate).toBe(0.95);
   });
 });

@@ -208,7 +208,7 @@ export interface MiniMaxTtsOptions {
   apiKey: string;
   /** MiniMax GroupId（放进 query 参数 GroupId） */
   groupId: string;
-  /** 系统音色 ID，如 Chinese (Mandarin)_Warm_Girl（温暖少女） */
+  /** 系统音色 ID，如 Chinese_wenrounvxing（温柔女性） */
   voice: string;
   model?: string;
   /** 语速 0.5~2.0，默认 1 */
