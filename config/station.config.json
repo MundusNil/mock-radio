@@ -38,18 +38,18 @@
   "llm": {
     "provider": "ark",
     "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
-    "model": "doubao-seed-2-1-turbo-260628",
+    "model": "doubao-seed-2-1-pro-260628",
     "apiKeyEnv": "ARK_API_KEY",
     "temperature": 0.8,
     "webSearch": true,
     "timeoutMs": 120000,
     "maxTokens": 2500,
-    "maxSegmentChars": 100,
+    "maxSegmentChars": 180,
     "maxSegmentCharsByKind": {
       "station_id": 40,
-      "interlude": 100,
+      "interlude": 180,
       "topic": 400,
-      "reply": 160,
+      "reply": 180,
       "request_ack": 80
     }
   },

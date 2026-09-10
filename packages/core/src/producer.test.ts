@@ -67,7 +67,7 @@ describe('段落生产 · 就绪', () => {
     });
   });
 
-  it('把最近已播口播交给提示词作禁止续写护栏，常规串场不点曲名', async () => {
+  it('把最近已播口播交给提示词作禁止续写护栏，常规串场曲名只作搜索来源', async () => {
     let user = '';
     const producer = createSegmentProducer({
       llm: {
@@ -98,7 +98,8 @@ describe('段落生产 · 就绪', () => {
     await producer.produce({ id: 'seg-guard', kind: 'interlude' });
     expect(user).toContain('不要续写其中的情节、角色或场景');
     expect(user).toContain('糖水铺');
-    expect(user).not.toContain('《月光小径》');
+    expect(user).toContain('《月光小径》');
+    expect(user).toContain('歌名别当报幕念出来');
   });
 });
 

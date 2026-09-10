@@ -24,7 +24,7 @@ describe('buildSegmentPrompt', () => {
   it('system 注入人格全文与直播规则', () => {
     const p = buildSegmentPrompt(ctx);
     expect(p.system).toContain(PERSONA);
-    expect(p.system).toContain('你是梦可，一台 AI 氛围电台的主播，正在直播');
+    expect(p.system).toContain('你是梦可。你在做直播，不是在聊天窗口里当助手');
     expect(p.system).not.toContain('{PERSONA}');
   });
 
@@ -34,9 +34,12 @@ describe('buildSegmentPrompt', () => {
     expect(p.system).not.toContain('{STATION_NAME}');
   });
 
-  it('常规串场不把曲名、时段、moodHint 写成开口指令', () => {
+  it('常规串场把曲目当搜索来源，不把时段、moodHint 写成开口指令', () => {
     const p = buildSegmentPrompt(ctx);
-    expect(p.user).not.toContain('《月光小径》');
+    expect(p.user).toContain('《月光小径》');
+    expect(p.user).toContain('歌名别当报幕念出来');
+    expect(p.user).toContain('基础背景');
+    expect(p.user).toContain('自己找一个话题');
     expect(p.user).not.toContain('《晨雾》');
     expect(p.user).not.toContain('周三');
     expect(p.user).not.toContain('渐暗');
@@ -44,13 +47,13 @@ describe('buildSegmentPrompt', () => {
     expect(p.system).toContain('不报时式开场');
   });
 
-  it('reply 才给正在播的曲名，便于回应点歌或问歌', () => {
+  it('reply 用「正在播放」点曲名，便于回应点歌或问歌', () => {
     const p = buildSegmentPrompt({
       ...ctx,
       kind: 'reply',
       replyTo: [{ id: 'm1', body: '这首是什么' }],
     });
-    expect(p.user).toContain('《月光小径》');
+    expect(p.user).toContain('正在放《月光小径》');
     expect(p.user).toContain('这首是什么');
   });
 
@@ -58,6 +61,8 @@ describe('buildSegmentPrompt', () => {
     const p = buildSegmentPrompt({ ...ctx, kind: 'station_id' });
     expect(p.user).toContain('不得点名');
     expect(p.user).toContain('欢迎回来');
+    expect(p.user).toContain('不必搜索');
+    expect(p.user).not.toContain('《月光小径》');
   });
 
   it('串场只约束意图不设字数门禁（FR-032/033），但不再教具体意象', () => {
@@ -71,21 +76,52 @@ describe('buildSegmentPrompt', () => {
       expect(p.user).not.toContain('200~450 字');
       expect(p.user).not.toContain('15~35 字');
     }
-    expect(interlude.user).toContain('话少不硬撑');
-    expect(interlude.user).toContain('不要描写房间');
+    expect(interlude.user).toContain('有话才开口');
+    expect(interlude.user).toContain('不要无来由的体感一句');
+    expect(interlude.user).toContain('不要谜语');
+    expect(interlude.user).toContain('不要写成作品介绍短篇');
+    expect(interlude.system).toContain('不要描写房间');
   });
 
-  it('开口说完就停，不留半句给下次', () => {
+  it('开口须有事由：把一件具体的事讲清楚再停，不留半句给下次', () => {
     const p = buildSegmentPrompt(ctx);
-    expect(p.system).toContain('说完就停');
+    expect(p.system).toContain('有一件具体的事要讲完');
+    expect(p.system).toContain('把这件事讲清楚再停');
     expect(p.system).toContain('不要留半句等下次接');
+    expect(p.system).toContain('宁可多说两句让人听懂');
+    expect(p.system).toContain('也不是把整部作品讲一遍');
     expect(p.user).toContain('说完再停');
   });
 
-  it('文案与韵律解耦：只要整段 text，不要逐句 emotion/pause', () => {
+  it('搜索是案头准备：摸清背景后自己找话题，禁止交代「我查了」', () => {
     const p = buildSegmentPrompt(ctx);
-    expect(p.system).toContain('"text"');
-    expect(p.system).toContain('songRequest');
+    expect(p.system).toContain('你是主持人，不是检索助手');
+    expect(p.system).toContain('基础背景搜清楚');
+    expect(p.system).toContain('自己挑一个话题');
+    expect(p.system).toContain('我刚才查了');
+    expect(p.system).toContain('我搜了一下');
+    expect(p.system).toContain('听众应觉得你懂这档节目');
+    expect(p.user).toContain('别说你查过');
+  });
+
+  it('系统给冻结口吻样本，学劲儿不学情节', () => {
+    const p = buildSegmentPrompt(ctx);
+    expect(p.system).toContain('像这样说');
+    expect(p.system).toContain('不要这样说');
+    expect(p.system).toContain('想说的就是这个');
+    expect(p.system).toContain('不谜语');
+    expect(p.system).toContain('灯拧暗了一格');
+    expect(p.system).toContain('肩膀就松下来了');
+    expect(p.system).toContain('温温的合成器');
+    expect(p.user).not.toContain('像这样说');
+  });
+
+  it('文案与韵律解耦：直接开口纯文本，不要 JSON 合同或逐句 emotion/pause', () => {
+    const p = buildSegmentPrompt(ctx);
+    expect(p.system).toContain('直接开口');
+    expect(p.system).toContain('不要 JSON');
+    expect(p.system).not.toContain('只输出 JSON');
+    expect(p.system).not.toContain('songRequest');
     expect(p.system).not.toContain('"lines"');
     expect(p.system).not.toContain('emotion');
     expect(p.system).not.toContain('pause');
@@ -98,6 +134,7 @@ describe('buildSegmentPrompt', () => {
     expect(p.system).toContain('不报时式开场');
     expect(p.system).toContain('不逐首报幕');
     expect(p.system).toContain('希望你');
+    expect(p.system).toContain('肩膀就松下来了');
   });
 
   it('换曲间隙的常规串场也不出现曲名', () => {
@@ -144,7 +181,7 @@ describe('buildSegmentPrompt · P3 记忆（FR-071/072）', () => {
     });
     expect(p.user).toContain('答应过听众下次放一首安静的歌');
     expect(p.user).toContain('「暖色调」成了节目内部梗');
-    expect(p.user).toContain('只可引用这些真实发生过的事');
+    expect(p.user).toContain('只可引用这些真实发生过的');
   });
 
   it('记忆引用点到为止，不扩写成场景描写', () => {
@@ -153,12 +190,12 @@ describe('buildSegmentPrompt · P3 记忆（FR-071/072）', () => {
       kind: 'interlude',
       memories: [{ kind: 'topic', text: '聊过亮着灯的小店', importance: 0.5 }],
     });
-    expect(p.user).toContain('引用点到为止，不要扩写成场景描写');
+    expect(p.user).toContain('点到为止');
   });
 
   it('没有记忆时不出现记忆段落', () => {
     const p = buildSegmentPrompt({ ...ctx, kind: 'interlude' });
-    expect(p.user).not.toContain('你记得的节目历史');
+    expect(p.user).not.toContain('你记得的节目事');
   });
 });
 
@@ -183,9 +220,10 @@ describe('buildSegmentPrompt · 非酒馆装配', () => {
     expect(p.user).not.toContain('你刚才说');
   });
 
-  it('收尾是播报式「现在开口」，不是续聊式「接着说就好」', () => {
+  it('收尾是导播口令，不是续聊式「接着说就好」', () => {
     const p = buildSegmentPrompt(ctx);
-    expect(p.user).toContain('现在开口');
+    expect(p.user).toContain('导播：轮到你了');
+    expect(p.user).toContain('把话说明白，不是填表');
     expect(p.user).not.toContain('接着说就好');
     expect(p.user).not.toContain('请播一段');
     expect(p.system).not.toContain('写你的下一句');

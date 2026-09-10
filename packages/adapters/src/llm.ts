@@ -21,7 +21,7 @@ export interface OpenAiCompatibleOptions {
   timeoutMs?: number;
   /** 网络失败时的重试次数 */
   retries?: number;
-  /** 开启模型内置联网搜索（方舟 web_search；豆包等支持，DeepSeek 不支持） */
+  /** 开启模型内置联网搜索（方舟 web_search；豆包等支持，DeepSeek 不支持）。只用于 generateSegment；extractMemories 强制关闭。 */
   webSearch?: boolean;
   /** 单次生成的最大 token 数（长篇口播需要放宽） */
   maxTokens?: number;
@@ -69,8 +69,8 @@ function toSpeechLines(raw: unknown): SpeechLine[] | undefined {
 }
 
 /**
- * 解析 LLM 输出：优先 JSON（逐句韵律 + 结构化点歌意图），
- * 解析失败回退纯文本（文本即回复内容，songRequest 缺省）。
+ * 解析 LLM 输出：模型若仍包一层 JSON 就拆 text / songRequest，
+ * 否则整段当口播（songRequest 缺省）。
  */
 function parseDraft(raw: string): SegmentDraft {
   const trimmed = raw.trim();
@@ -109,13 +109,16 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
     timeoutMs = 30_000,
     retries = 1,
     webSearch = false,
-    // 长篇口播：几百字 + JSON 结构，1200 会被截断成半句话
+    // 口播按纯文本解码；记忆提取仍走 JSON
     maxTokens = 2500,
   } = options;
 
   async function chatOnce(
     messages: Array<{ role: 'system' | 'user'; content: string }>,
+    opts: { webSearch?: boolean; jsonObject?: boolean } = {},
   ): Promise<string> {
+    const useSearch = opts.webSearch ?? webSearch;
+    const jsonObject = opts.jsonObject === true;
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -127,8 +130,8 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
         messages,
         temperature,
         max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-        ...(webSearch ? { web_search: { enable: true } } : {}),
+        ...(jsonObject ? { response_format: { type: 'json_object' } } : {}),
+        ...(useSearch ? { web_search: { enable: true } } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -170,7 +173,7 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
         { role: 'user' as const, content: segmentText.slice(0, 2000) },
       ];
       try {
-        const text = await chatOnce(messages);
+        const text = await chatOnce(messages, { webSearch: false, jsonObject: true });
         return parseMemoryExtraction(text);
       } catch {
         // 提取失败不阻塞节目（策展失败 = 本次不记，安全）
