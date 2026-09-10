@@ -293,7 +293,6 @@ body {
 
 .ui-button:focus-visible,
 .ui-icon-button:focus-visible,
-.ui-field:focus-visible,
 .ui-slider:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -314,6 +313,14 @@ body {
   border-radius: 0;
   outline: none;
   box-shadow: none;
+}
+
+/* 聚焦只留光标 + 底线提亮，不画强调色方框（用户指定；:focus-visible 比 .ui-field 更具体，必须单独关掉） */
+.ui-field:focus,
+.ui-field:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-bottom-color: var(--fg);
 }
 
 .ui-field::placeholder {
@@ -924,7 +931,7 @@ body {
   -webkit-text-security: disc;
 }
 
-/* 聚焦只留文本光标，不画强调色描边（用户指定） */
+/* 密钥框同样不画强调色描边 */
 .ui-field--secret:focus-visible {
   outline: none;
 }

@@ -81,7 +81,7 @@ beforeAll(() => {
       cacheDir: dir,
       speechRate: 0.9,
       edge: { voice: 'v' },
-      minimax: { voice: 'v', model: 'm', apiKeyEnv: 'A', groupIdEnv: 'G' },
+      minimax: { voice: 'v', model: 'm', vol: 1.5, apiKeyEnv: 'A', groupIdEnv: 'G' },
     },
     messages: { retentionDays: 7 },
     library: { root: dir },

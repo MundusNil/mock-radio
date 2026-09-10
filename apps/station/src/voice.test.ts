@@ -70,6 +70,8 @@ describe('validateVoicePatch', () => {
     expect(() => validateVoicePatch({ cadence: 'chatty' })).toThrow(/未知发言频率档位/);
     expect(() => validateVoicePatch({})).toThrow(/没有可应用/);
     expect(() => validateVoicePatch({ enabled: 'yes' as unknown as boolean })).toThrow(/布尔值/);
+    expect(() => validateVoicePatch({ minimaxVol: 0 })).toThrow(/\(0,10]/);
+    expect(() => validateVoicePatch({ minimaxVoice: '  ' })).toThrow(/非空/);
   });
 });
 
@@ -122,5 +124,43 @@ describe('applyVoiceSettings · 写回 station.config.json + 热更新内存配�
       speechVolume: 1,
       cadence: 'sparse',
     });
+  });
+
+  it('minimax 音色与 vol 写盘并热更新内存', () => {
+    const path = configFile(
+      JSON.stringify({ tts: { minimax: { voice: 'old', model: 'speech-2.8-hd', vol: 1 } } }),
+    );
+    const config = makeConfig({
+      tts: { speechRate: 0.9, minimax: { voice: 'old', vol: 1 } },
+    });
+    const res = applyVoiceSettings(path, config, {
+      minimaxVoice: 'Chinese (Mandarin)_Warm_Girl',
+      minimaxVol: 1.5,
+    });
+    expect(res.minimaxVoice).toBe('Chinese (Mandarin)_Warm_Girl');
+    expect(res.minimaxVol).toBe(1.5);
+    expect(config.tts.minimax?.voice).toBe('Chinese (Mandarin)_Warm_Girl');
+    expect(config.tts.minimax?.vol).toBe(1.5);
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as {
+      tts: { minimax: { voice: string; vol: number; model: string } };
+    };
+    expect(raw.tts.minimax.voice).toBe('Chinese (Mandarin)_Warm_Girl');
+    expect(raw.tts.minimax.vol).toBe(1.5);
+    expect(raw.tts.minimax.model).toBe('speech-2.8-hd');
+  });
+
+  it('只改语速时也会把盘上的音色灌进内存', () => {
+    const path = configFile(
+      JSON.stringify({
+        tts: { speechRate: 0.9, minimax: { voice: 'Chinese (Mandarin)_Warm_Girl', vol: 1.5 } },
+      }),
+    );
+    const config = makeConfig({
+      tts: { speechRate: 0.9, minimax: { voice: 'old', vol: 1 } },
+    });
+    applyVoiceSettings(path, config, { speechRate: 0.95 });
+    expect(config.tts.minimax?.voice).toBe('Chinese (Mandarin)_Warm_Girl');
+    expect(config.tts.minimax?.vol).toBe(1.5);
+    expect(config.tts.speechRate).toBe(0.95);
   });
 });

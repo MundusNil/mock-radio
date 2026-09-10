@@ -3,12 +3,12 @@
  * 铁律 4：调电台 = 改 station.config.json —— 面板只是这份配置的编辑界面，
  * 写盘后重启仍保持；内存里的 runtime config 同步更新，当次进程立即生效。
  *
- * 三项设置：
- *  - enabled      语音功能总开关（关 = 引擎不规划段落，LLM/TTS 零调用零费用，只放歌）
- *  - speechRate   语速基准 0.5~1.5（provider 中立；minimax speed 直接用，edge 换算成 ±%）
- *  - speechVolume 主播音量 0~1（loudnorm 会把各段响度归一，TTS 侧 vol 会被抹平；
- *                 真正的音量控制落在前端语音轨增益，见 apps/web/src/audio.ts）
- *  - cadence      发言频率档位（三档预设 → engine.talkIntervalMs 区间）
+ *  - enabled       语音功能总开关（关 = 引擎不规划段落，LLM/TTS 零调用零费用，只放歌）
+ *  - speechRate    语速基准 0.5~1.5（provider 中立；minimax speed 直接用，edge 换算成 ±%）
+ *  - speechVolume  主播音量 0~1（前端语音轨增益，见 apps/web/src/audio.ts）
+ *  - cadence       发言频率档位（三档预设 → engine.talkIntervalMs 区间）
+ *  - minimaxVoice  MiniMax 系统音色 ID（写 tts.minimax.voice；下次合成即新声）
+ *  - minimaxVol    MiniMax 合成音量 (0,10]（写 tts.minimax.vol；loudnorm 前的源电平）
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -17,6 +17,8 @@ export interface VoiceSettings {
   speechRate: number;
   speechVolume: number;
   cadence: CadenceId;
+  minimaxVoice?: string;
+  minimaxVol?: number;
 }
 
 export type CadenceId = 'sparse' | 'gentle' | 'close';
@@ -85,16 +87,22 @@ export function cadenceOfInterval(intervalMs: [number, number]): CadenceId {
 export interface VoiceConfigShape {
   engine: { voiceEnabled: boolean; talkIntervalMs: [number, number] };
   audio: { speechVolume?: number };
-  tts: { speechRate: number };
+  tts: {
+    speechRate: number;
+    minimax?: { voice: string; model?: string; vol?: number };
+  };
 }
 
 export function readVoiceSettings(config: VoiceConfigShape): VoiceSettings {
-  return {
+  const settings: VoiceSettings = {
     enabled: config.engine.voiceEnabled,
     speechRate: config.tts.speechRate,
     speechVolume: config.audio.speechVolume ?? 1,
     cadence: cadenceOfInterval(config.engine.talkIntervalMs),
   };
+  if (config.tts.minimax?.voice) settings.minimaxVoice = config.tts.minimax.voice;
+  if (config.tts.minimax?.vol !== undefined) settings.minimaxVol = config.tts.minimax.vol;
+  return settings;
 }
 
 export interface VoicePatch {
@@ -102,6 +110,8 @@ export interface VoicePatch {
   speechRate?: unknown;
   speechVolume?: unknown;
   cadence?: unknown;
+  minimaxVoice?: unknown;
+  minimaxVol?: unknown;
 }
 
 /** 校验并归一化面板提交；非法值抛错（路由转 400） */
@@ -135,6 +145,21 @@ export function validateVoicePatch(patch: VoicePatch): Partial<VoiceSettings> {
     }
     out.cadence = patch.cadence as CadenceId;
   }
+  if (patch.minimaxVoice !== undefined) {
+    if (typeof patch.minimaxVoice !== 'string' || !patch.minimaxVoice.trim()) {
+      throw new Error('minimaxVoice 必须是非空字符串');
+    }
+    out.minimaxVoice = patch.minimaxVoice.trim();
+  }
+  if (patch.minimaxVol !== undefined) {
+    if (typeof patch.minimaxVol !== 'number' || !Number.isFinite(patch.minimaxVol)) {
+      throw new Error('minimaxVol 必须是数字');
+    }
+    if (patch.minimaxVol <= 0 || patch.minimaxVol > 10) {
+      throw new Error('minimaxVol 需在 (0,10] 之间');
+    }
+    out.minimaxVol = Math.round(patch.minimaxVol * 100) / 100;
+  }
   if (Object.keys(out).length === 0) throw new Error('没有可应用的语音设置');
   return out;
 }
@@ -158,6 +183,23 @@ export function applyVoiceSettings(
   raw.engine ??= {};
   raw.audio ??= {};
   raw.tts ??= {};
+  const minimaxRaw =
+    raw.tts.minimax && typeof raw.tts.minimax === 'object' && !Array.isArray(raw.tts.minimax)
+      ? { ...(raw.tts.minimax as Record<string, unknown>) }
+      : {};
+
+  // json 里已有的音色/vol 先灌进内存：手工改盘后，任意一次语音热更都会带上
+  if (config.tts.minimax) {
+    if (typeof minimaxRaw.voice === 'string' && minimaxRaw.voice.trim()) {
+      config.tts.minimax.voice = minimaxRaw.voice.trim();
+    }
+    if (typeof minimaxRaw.model === 'string' && minimaxRaw.model.trim()) {
+      config.tts.minimax.model = minimaxRaw.model.trim();
+    }
+    if (typeof minimaxRaw.vol === 'number' && Number.isFinite(minimaxRaw.vol)) {
+      config.tts.minimax.vol = Math.min(10, Math.max(0.1, minimaxRaw.vol));
+    }
+  }
 
   if (valid.enabled !== undefined) {
     raw.engine.voiceEnabled = valid.enabled;
@@ -175,6 +217,16 @@ export function applyVoiceSettings(
   if (valid.speechVolume !== undefined) {
     raw.audio.speechVolume = valid.speechVolume;
     config.audio.speechVolume = valid.speechVolume;
+  }
+  if (valid.minimaxVoice !== undefined) {
+    minimaxRaw.voice = valid.minimaxVoice;
+    raw.tts.minimax = minimaxRaw;
+    if (config.tts.minimax) config.tts.minimax.voice = valid.minimaxVoice;
+  }
+  if (valid.minimaxVol !== undefined) {
+    minimaxRaw.vol = valid.minimaxVol;
+    raw.tts.minimax = minimaxRaw;
+    if (config.tts.minimax) config.tts.minimax.vol = valid.minimaxVol;
   }
 
   writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');

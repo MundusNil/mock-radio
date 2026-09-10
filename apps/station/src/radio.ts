@@ -428,7 +428,7 @@ export function createRadio(deps: RadioDeps): Radio {
     c.json({ settings: readVoiceSettings(deps.runtimeConfig), cadences: CADENCE_PRESETS }),
   );
 
-  /** 应用语音设置：写盘 → 更新内存配置 → 引擎热开关 → 重建 TTS（语速） */
+  /** 应用语音设置：写盘 → 更新内存配置 → 引擎热开关 → 重建 TTS（语速/音色/合成音量） */
   app.post('/api/admin/voice', async (c) => {
     let body: unknown;
     try {
@@ -454,7 +454,7 @@ export function createRadio(deps: RadioDeps): Radio {
       // 语速变了：重建 TTS 客户端（下次合成即新值）
       currentTts = deps.ttsFactory();
       console.log(
-        `[radio] 🎙️ 语音设置已更新并写入配置：enabled=${settings.enabled} 语速=${settings.speechRate} 音量=${settings.speechVolume} 频率=${settings.cadence}`,
+        `[radio] 🎙️ 语音设置已更新并写入配置：enabled=${settings.enabled} 语速=${settings.speechRate} 音量=${settings.speechVolume} 频率=${settings.cadence}${settings.minimaxVoice ? ` 音色=${settings.minimaxVoice}` : ''}${settings.minimaxVol != null ? ` vol=${settings.minimaxVol}` : ''}`,
       );
       broadcast({
         type: 'voice-settings',

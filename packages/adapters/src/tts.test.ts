@@ -24,7 +24,7 @@ type MiniMaxRequestBody = {
   text: string;
   stream: boolean;
   output_format: string;
-  voice_setting: { voice_id: string; speed: number; emotion?: string };
+  voice_setting: { voice_id: string; speed: number; vol?: number; emotion?: string };
   audio_setting: { format: string };
 };
 
@@ -132,8 +132,9 @@ describe('createMiniMaxTts', () => {
       apiKey: 'MY_KEY',
       groupId: 'MY_GROUP',
       voice: 'female-tianmei',
-      model: 'speech-02-hd',
+      model: 'speech-2.8-hd',
       speed: 1.1,
+      vol: 1.5,
       cacheDir: CACHE,
       loudnorm: false,
       fetchImpl,
@@ -150,11 +151,12 @@ describe('createMiniMaxTts', () => {
     expect(authorization).toBe('Bearer MY_KEY');
     expect(contentType).toBe('application/json');
     const body = call0.body as MiniMaxRequestBody;
-    expect(body.model).toBe('speech-02-hd');
+    expect(body.model).toBe('speech-2.8-hd');
     expect(body.stream).toBe(false);
     expect(body.output_format).toBe('hex');
     expect(body.voice_setting.voice_id).toBe('female-tianmei');
     expect(body.voice_setting.speed).toBe(1.1);
+    expect(body.voice_setting.vol).toBe(1.5);
     expect(body.audio_setting.format).toBe('mp3');
   });
 
@@ -374,7 +376,7 @@ describe('createTts 工厂', () => {
       speechRate: 1,
       minimax: {
         voice: 'female-tianmei',
-        model: 'speech-02-hd',
+        model: 'speech-2.8-hd',
         apiKeyEnv: 'MINIMAX_API_KEY',
         groupIdEnv: 'MINIMAX_GROUP_ID',
       },
@@ -400,7 +402,7 @@ describe('createTts 工厂', () => {
       speechRate: 0.9,
       minimax: {
         voice: 'female-tianmei',
-        model: 'speech-02-hd',
+        model: 'speech-2.8-hd',
         apiKeyEnv: 'MINIMAX_API_KEY',
         groupIdEnv: 'MINIMAX_GROUP_ID',
       },

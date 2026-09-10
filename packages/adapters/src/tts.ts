@@ -208,12 +208,12 @@ export interface MiniMaxTtsOptions {
   apiKey: string;
   /** MiniMax GroupId（放进 query 参数 GroupId） */
   groupId: string;
-  /** 系统音色 ID，如 Chinese_wenrounvxing（温柔女性） */
+  /** 系统音色 ID，如 Chinese (Mandarin)_Warm_Girl（温暖少女） */
   voice: string;
   model?: string;
   /** 语速 0.5~2.0，默认 1 */
   speed?: number;
-  /** 音量 0~10，默认 1 */
+  /** 音量 (0,10]，默认 1 */
   vol?: number;
   /** 音调 -12~12，默认 0 */
   pitch?: number;
@@ -268,7 +268,7 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
     apiKey,
     groupId,
     voice,
-    model = 'speech-02-hd',
+    model = 'speech-2.8-hd',
     speed = 1,
     vol = 1,
     pitch = 0,
@@ -339,7 +339,7 @@ export function createMiniMaxTts(options: MiniMaxTtsOptions): TtsClient {
         speed,
         emotion: p.emotion,
       }));
-      const hash = cacheHash([`minimax:${model}:${voice}`, JSON.stringify(rendered)]);
+      const hash = cacheHash([`minimax:${model}:${voice}:vol=${vol}`, JSON.stringify(rendered)]);
       return runCachedPipeline({
         cacheDir,
         hash,
@@ -384,6 +384,8 @@ export interface CreateTtsParams {
     apiKeyEnv: string;
     groupIdEnv: string;
     model: string;
+    /** MiniMax 合成音量 (0,10]；缺省 1 */
+    vol?: number;
   };
   /** 从环境变量取值（注入以便测试；运行时传 process.env 的取值函数） */
   resolveEnv: (name: string) => string | undefined;
@@ -395,7 +397,7 @@ export function createTts(params: CreateTtsParams): TtsClient {
   const loudnorm = params.postProcess === 'loudnorm';
 
   if (params.provider === 'minimax') {
-    const { voice, apiKeyEnv, groupIdEnv, model } = params.minimax;
+    const { voice, apiKeyEnv, groupIdEnv, model, vol } = params.minimax;
     const apiKey = params.resolveEnv(apiKeyEnv) ?? '';
     const groupId = params.resolveEnv(groupIdEnv) ?? '';
     if (!apiKey || !groupId) {
@@ -409,6 +411,7 @@ export function createTts(params: CreateTtsParams): TtsClient {
       voice,
       model,
       speed: params.speechRate,
+      vol,
       cacheDir: params.cacheDir,
       loudnorm,
       fetchImpl: params.fetchImpl,

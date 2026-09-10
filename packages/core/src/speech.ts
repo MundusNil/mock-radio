@@ -19,7 +19,7 @@ export interface SpeechLine {
   pauseAfterSec?: number;
 }
 
-/** 情绪白名单（MiniMax speech-02 系列取值；其它供应商忽略不支持的项） */
+/** 情绪白名单（MiniMax T2A 取值；其它供应商忽略不支持的项） */
 export const SPEECH_EMOTIONS = [
   'happy',
   'sad',
