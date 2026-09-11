@@ -16,10 +16,10 @@ describe('planDeskQueries', () => {
       expect(q.q).toContain('Showtime!');
       expect(q.q).toContain('VA-11 HALL-A');
     }
-    expect(queries[0]?.q).toContain('场景');
-    expect(queries[1]?.q).toContain('玩家评价');
-    expect(queries[1]?.q).toContain('原话');
-    expect(queries[2]?.q).toContain('编曲');
+    expect(queries[0]?.q).toContain('scene');
+    expect(queries[1]?.q).toContain('review');
+    expect(queries[1]?.q).toContain('player');
+    expect(queries[2]?.q).toContain('instrumentation');
     expect(new Set(queries.map((q) => q.q)).size).toBe(3);
   });
 

@@ -57,7 +57,13 @@ const LANE_FROM_RAW: Record<string, DeskLane> = {
   评论: 'music',
 };
 
-/** 确定性三路：官方/作品场景、玩家社区、华语乐评。互不合并成「游戏介绍」。 */
+/**
+ * 确定性三路：作品场景 / 玩家社区 / 乐评。互不合并成「游戏介绍」。
+ * 模板用英文（2026-09-11 实测换形）：曲名/作品名本就是英文专有名词，活口引擎
+ * （yandex/sogou/naver）对中文长尾查询漂到 mp3 站/公众号垃圾；同曲英文形状
+ * 实测命中 howlongtobeat / Steam 评测页（17.8k 字符 vs 中文 9.6k、页页有料）。
+ * lane 意图不变，只换问法语言。
+ */
 export function planDeskQueries(track: TrackBrief): DeskQuery[] {
   const title = track.title.trim();
   const work = track.artist?.trim() ?? '';
@@ -66,15 +72,15 @@ export function planDeskQueries(track: TrackBrief): DeskQuery[] {
   return [
     {
       lane: 'work',
-      q: `${title}${workBit}${styleBit} 这首歌出现在哪个场景 关卡 剧情`.trim(),
+      q: `${title}${workBit}${styleBit} game scene chapter OST`,
     },
     {
       lane: 'community',
-      q: `玩家评价 ${title}${workBit} 这首歌 原话`.trim(),
+      q: `${title}${workBit} steam review player comment`,
     },
     {
       lane: 'music',
-      q: `${title}${workBit} 编曲 乐器 具体评论`.trim(),
+      q: `${title}${workBit} OST review instrumentation composer`,
     },
   ];
 }
