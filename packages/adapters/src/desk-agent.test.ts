@@ -82,7 +82,7 @@ describe('desk-agent 图', () => {
       { content: searchJson([NOTE_WORK, NOTE_MUSIC]) },
       { content: evalJson(true) },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(calls).toHaveLength(2);
     expect(calls[0]?.web_search).toEqual({ enable: true });
     expect(calls[0]?.thinking).toEqual({ type: 'disabled' });
@@ -99,7 +99,7 @@ describe('desk-agent 图', () => {
       { content: searchJson([NOTE_COMMUNITY]) },
       { content: evalJson(true) },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(calls.filter((c) => c.web_search)).toHaveLength(2); // 2 搜 + 2 评
     // 补搜请求的提示词里必须是质检的查询，不是原始三路
     expect(calls[2]?.messages?.[0]?.content).toContain('VA-11 Showtime 玩家 原话 评价');
@@ -116,7 +116,7 @@ describe('desk-agent 图', () => {
       { content: searchJson([NOTE_COMMUNITY]) },
       { content: evalJson(false, [refine]) },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(calls.filter((c) => c.web_search)).toHaveLength(3);
     // 第 3 轮合并后总数触顶 3 → evaluate 提前收口
     expect(notes.notes).toHaveLength(3);
@@ -138,7 +138,7 @@ describe('desk-agent 图', () => {
       { content: searchJson([NOTE_WORK]) },
       { content: evalJson(true) },
     ]);
-    const notes = await createDeskAgentLlm({ ...baseOpts, deskTimeoutMs: 50 }).researchDesk!(brief);
+    const notes = await createDeskAgentLlm({ ...baseOpts, deskTimeoutMs: 50 }).researchDesk(brief);
     expect(calls.filter((c) => c.web_search)).toHaveLength(1);
     expect(notes.notes).toEqual([NOTE_MUSIC]); // 半程笔记照常出口
   });
@@ -158,7 +158,7 @@ describe('desk-agent 图', () => {
         else init?.signal?.addEventListener('abort', abort);
       });
     });
-    const pending = createDeskAgentLlm(baseOpts).researchDesk!(brief, controller.signal);
+    const pending = createDeskAgentLlm(baseOpts).researchDesk(brief, controller.signal);
     const failure = pending.catch((e: unknown) => e as Error);
     await entered; // 等真实进入 fetch，不猜时长
     expect(sawSignal).toBeDefined();
@@ -174,7 +174,7 @@ describe('desk-agent 图', () => {
       { content: searchJson([NOTE_WORK]) },
       { error: new Error('LLM HTTP 500') }, // evaluate 的 chat 调用炸（非 abort）
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(notes.notes).toEqual([NOTE_WORK]);
     expect(calls).toHaveLength(2); // 质检失败后没有第三次请求
   });
@@ -185,12 +185,12 @@ describe('desk-agent 图', () => {
       { content: evalJson(false, [{ lane: 'music', q: 'Showtime 编曲 乐器 分析' }]) },
       { error: new Error('LLM HTTP 500') },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(notes.notes).toEqual([NOTE_WORK]);
     expect(calls.filter((c) => c.web_search)).toHaveLength(2); // 炸的那次不再续环
 
     stubScript([{ error: new Error('LLM HTTP 500') }]);
-    await expect(createDeskAgentLlm(baseOpts).researchDesk!(brief)).rejects.toThrow('HTTP 500');
+    await expect(createDeskAgentLlm(baseOpts).researchDesk(brief)).rejects.toThrow('HTTP 500');
   });
 
   it('lane 去重与每 lane ≤2 / 总 ≤3（跨轮合并语义）', async () => {
@@ -211,7 +211,7 @@ describe('desk-agent 图', () => {
       },
       { content: evalJson(true) },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts).researchDesk(brief);
     expect(notes.notes.filter((n) => n.lane === 'work')).toHaveLength(2);
     expect(notes.notes).toHaveLength(3);
   });
@@ -219,7 +219,7 @@ describe('desk-agent 图', () => {
   it('webSearch 关闭 → 零请求空笔记（与旧实现同契约）', async () => {
     const { calls } = stubScript([{ content: 'should not run' }]);
     const client = createDeskAgentLlm({ ...baseOpts, webSearch: false });
-    const notes = await client.researchDesk!(brief);
+    const notes = await client.researchDesk(brief);
     expect(calls).toHaveLength(0);
     expect(notes.notes).toEqual([]);
   });
@@ -242,7 +242,7 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
       { content: evalJson(true) },
     ]);
     const searcher = vi.fn(async () => MATERIAL);
-    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk(brief);
     expect(searcher).toHaveBeenCalledTimes(1);
     // 提炼那次 chat：普通 prompt token（无 web_search）+ JSON 模式
     expect(calls[0]?.web_search).toBeUndefined();
@@ -254,7 +254,7 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
   it('材料为空 → 不发提炼 chat，轮数照记，质检正常收口', async () => {
     const { calls } = stubScript([{ content: evalJson(true) }]);
     const searcher = vi.fn(async () => null);
-    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk(brief);
     expect(searcher).toHaveBeenCalledTimes(1);
     // 只有一次 chat，且是质检（JSON 模式），不是提炼
     expect(calls).toHaveLength(1);
@@ -275,7 +275,7 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
       { content: searchJson([NOTE_COMMUNITY]) },
       { content: evalJson(true) },
     ]);
-    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk(brief);
     expect(seenQueries).toHaveLength(2);
     expect(seenQueries[1]).toEqual(['VA-11 Showtime 玩家 原话 评价']);
     expect(notes.notes).toEqual([NOTE_MUSIC, NOTE_COMMUNITY]);
@@ -286,7 +286,7 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
     const searcher = async () => {
       throw new Error('SearXNG 没起');
     };
-    await expect(createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief)).rejects.toThrow(
+    await expect(createDeskAgentLlm(baseOpts, searcher).researchDesk(brief)).rejects.toThrow(
       'SearXNG 没起',
     );
   });
@@ -304,7 +304,7 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
       return MATERIAL;
     };
     stubScript([{ content: 'should not run' }]);
-    const pending = createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief, controller.signal);
+    const pending = createDeskAgentLlm(baseOpts, searcher).researchDesk(brief, controller.signal);
     const failure = pending.catch((e: unknown) => e as Error);
     // 等 searcher 真实进入（不猜时长）
     while (sawSignal === undefined) await Promise.resolve();
@@ -316,8 +316,10 @@ describe('desk-agent 本地检索路（searcher 注入）', () => {
   it('webSearch 关闭但 searcher 在场 → 案头照常跑（本地路不依赖方舟搜索通道）', async () => {
     stubScript([{ content: searchJson([NOTE_WORK]) }, { content: evalJson(true) }]);
     const searcher = vi.fn(async () => MATERIAL);
-    const notes = await createDeskAgentLlm({ ...baseOpts, webSearch: false }, searcher)
-      .researchDesk!(brief);
+    const notes = await createDeskAgentLlm(
+      { ...baseOpts, webSearch: false },
+      searcher,
+    ).researchDesk(brief);
     expect(searcher).toHaveBeenCalledTimes(1);
     expect(notes.notes).toEqual([NOTE_WORK]);
   });

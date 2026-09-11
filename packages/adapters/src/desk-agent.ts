@@ -190,13 +190,16 @@ lane 只能是 work/community/music，每条不超过 25 字，问具体的不�
     .compile();
 }
 
+/** 本工厂恒实现 researchDesk——返回类型收窄，调用方免判空。 */
+export type DeskAgentLlm = LlmClient & Required<Pick<LlmClient, 'researchDesk'>>;
+
 /** createOpenAiCompatibleLlm 的 drop-in 替代：只有 researchDesk 走图，其余原样委托。
  * searcher 传入 = 案头检索走本地管道（SearXNG+抓页，普通 token 提炼）；
  * 不传 = 走方舟 web_search（模型自带搜索，贵 token）。 */
 export function createDeskAgentLlm(
   options: OpenAiCompatibleOptions,
   searcher?: DeskSearcher,
-): LlmClient {
+): DeskAgentLlm {
   const base = createOpenAiCompatibleLlm(options);
   const deskTimeoutMs = options.deskTimeoutMs ?? DEFAULT_DESK_TIMEOUT_MS;
   const chat = createChat(options);
