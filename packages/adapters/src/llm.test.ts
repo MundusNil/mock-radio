@@ -80,42 +80,4 @@ describe('createOpenAiCompatibleLlm', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetches).toBe(1);
   });
-
-  it('researchDesk 开 web_search 并解析笔记', async () => {
-    const calls = stubChat('{"notes":[{"lane":"community","text":"Steam 有人挂标题画面一整晚"}]}');
-    const notes = await llm().researchDesk!({
-      trackId: 't1',
-      title: 'Showtime!',
-      artist: 'VA-11 HALL-A',
-      styles: ['game-bgm'],
-      queries: [
-        { lane: 'work', q: 'q1' },
-        { lane: 'community', q: 'q2' },
-        { lane: 'music', q: 'q3' },
-      ],
-    });
-    expect(notes.notes).toEqual([{ lane: 'community', text: 'Steam 有人挂标题画面一整晚' }]);
-    expect(calls[0]?.web_search).toEqual({ enable: true });
-    expect(calls[0]?.thinking).toEqual({ type: 'disabled' });
-    expect(calls[0]?.messages?.[0]?.content).toContain('q2');
-  });
-
-  it('webSearch 关闭时 researchDesk 不发请求', async () => {
-    const calls = stubChat('should not run');
-    const client = createOpenAiCompatibleLlm({
-      baseUrl: 'https://example.test/api/v3',
-      apiKey: 'k',
-      model: 'm',
-      webSearch: false,
-    });
-    const notes = await client.researchDesk!({
-      trackId: 't1',
-      title: 'Showtime!',
-      artist: null,
-      styles: [],
-      queries: [],
-    });
-    expect(notes.notes).toEqual([]);
-    expect(calls).toHaveLength(0);
-  });
 });

@@ -1,9 +1,8 @@
 /**
  * 案头多轮检索 agent（LangGraph.js）：search → evaluate →(不足)→ search ↺ → END。
  *
- * 与单轮 createOpenAiCompatibleLlm.researchDesk 的唯一差异就是这条环：
- * 搜完先让模型当「案头质检」，缺具体名字才补搜。对外仍是一个 LlmClient——
- * producer / 调度器 / 2.5s 竞态全部无感知。
+ * search 一轮拿基础笔记，evaluate 当「案头质检」：缺带具体名字的事实才补搜，≤3 轮。
+ * 对外是一个 LlmClient——producer / 调度器 / 2.5s 竞态全部无感知。
  *
  * 挂钟语义：deskTimeoutMs 从「单次调用超时」升级为「整图预算」。
  * deadlineAt 在 researchDesk 入口算一次；每个节点用剩余量做 fetch 超时，
@@ -184,6 +183,9 @@ export function createDeskAgentLlm(options: OpenAiCompatibleOptions): LlmClient 
       const state = await graph.invoke(
         { brief, queries: brief.queries, deadlineAt: Date.now() + deskTimeoutMs },
         { signal, recursionLimit: 12 },
+      );
+      console.log(
+        `[desk-agent] ${brief.title}：${state.round} 轮搜索 / ${state.notes.length} 条笔记`,
       );
       return { trackId: brief.trackId, queries: brief.queries, notes: state.notes };
     },

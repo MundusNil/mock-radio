@@ -1,7 +1,5 @@
 /** OpenAI 兼容 LLM 客户端（D7：DeepSeek / Qwen / GLM / Kimi 通吃，换供应商=改配置） */
 import type {
-  DeskNotes,
-  DeskResearchBrief,
   LlmClient,
   MemoryExtraction,
   SegmentDraft,
@@ -9,15 +7,13 @@ import type {
   SpeechLine,
 } from '@mock-radio/core';
 import {
-  buildDeskResearchPrompt,
   joinLinesText,
   MEMORY_EXTRACTION_SYSTEM,
   normalizeSpeechLines,
-  parseDeskNotes,
   parseMemoryExtraction,
 } from '@mock-radio/core';
 
-/** 案头检索整图挂钟预算默认值（ms）——单轮与多轮共用单一来源 */
+/** 案头检索整图挂钟预算默认值（ms）——desk-agent 图消费 */
 export const DEFAULT_DESK_TIMEOUT_MS = 90_000;
 
 export interface OpenAiCompatibleOptions {
@@ -26,7 +22,7 @@ export interface OpenAiCompatibleOptions {
   model: string;
   temperature?: number;
   timeoutMs?: number;
-  /** 案头检索超时。占曲目时间，默认 90s；开口仍走 timeoutMs。 */
+  /** 案头检索整图挂钟预算（ms）。占曲目时间，默认 90s；开口仍走 timeoutMs。 */
   deskTimeoutMs?: number;
   /** 网络失败时的重试次数 */
   retries?: number;
@@ -167,8 +163,9 @@ export function createChat(options: OpenAiCompatibleOptions): ChatFn {
   };
 }
 
+/** 基础 LLM 客户端：口播 + 记忆提取。案头检索由 createDeskAgentLlm（LangGraph 多轮图）提供。 */
 export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): LlmClient {
-  const { deskTimeoutMs = DEFAULT_DESK_TIMEOUT_MS, retries = 1, webSearch = false } = options;
+  const { retries = 1 } = options;
   const chatOnce = createChat(options);
 
   return {
@@ -205,21 +202,6 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
         // 提取失败不阻塞节目（策展失败 = 本次不记，安全）
         return [];
       }
-    },
-
-    async researchDesk(brief: DeskResearchBrief, extra?: AbortSignal): Promise<DeskNotes> {
-      if (!webSearch) {
-        return { trackId: brief.trackId, queries: brief.queries, notes: [] };
-      }
-      const prompt = buildDeskResearchPrompt(brief);
-      const text = await chatOnce(
-        [
-          { role: 'system' as const, content: prompt.system },
-          { role: 'user' as const, content: prompt.user },
-        ],
-        { webSearch: true, signal: extra, timeoutMs: deskTimeoutMs, disableThinking: true },
-      );
-      return parseDeskNotes(text, brief.trackId, brief.queries);
     },
   };
 }

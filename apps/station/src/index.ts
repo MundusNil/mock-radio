@@ -1,13 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
-import {
-  createDeskAgentLlm,
-  createOpenAiCompatibleLlm,
-  createStore,
-  createTts,
-  systemClock,
-} from '@mock-radio/adapters';
+import { createDeskAgentLlm, createStore, createTts, systemClock } from '@mock-radio/adapters';
 import { getDayPartContext } from '@mock-radio/core';
 import { loadStationConfig } from './config';
 import { loadEnvFile } from './env';
@@ -41,8 +35,9 @@ async function main(): Promise<void> {
     .join(' ');
 
   // 密钥工厂：每次调用都从 process.env 现取——设置面板写入 .env 后重建即生效
-  const llmFactory = () => {
-    const options = {
+  // 案头检索走 LangGraph 多轮图（search→evaluate↺，整图挂钟预算 deskTimeoutMs）
+  const llmFactory = () =>
+    createDeskAgentLlm({
       baseUrl: config.llm.baseUrl,
       apiKey: process.env[config.llm.apiKeyEnv] ?? '',
       model: config.llm.model,
@@ -51,10 +46,7 @@ async function main(): Promise<void> {
       timeoutMs: config.llm.timeoutMs,
       maxTokens: config.llm.maxTokens,
       deskTimeoutMs: config.llm.deskTimeoutMs,
-    };
-    // 案头多轮 agent 可关：关掉即回到单轮 prompt，一条 config 完成回滚
-    return config.llm.deskAgent ? createDeskAgentLlm(options) : createOpenAiCompatibleLlm(options);
-  };
+    });
   const ttsFactory = () =>
     createTts({
       provider: config.tts.provider,

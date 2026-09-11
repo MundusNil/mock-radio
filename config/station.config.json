@@ -42,7 +42,6 @@
     "apiKeyEnv": "ARK_API_KEY",
     "temperature": 0.8,
     "webSearch": true,
-    "deskAgent": true,
     "timeoutMs": 60000,
     "maxTokens": 2500,
     "maxSegmentChars": 180,
