@@ -232,6 +232,97 @@ describe('desk-agent 图', () => {
   });
 });
 
+describe('desk-agent 本地检索路（searcher 注入）', () => {
+  const MATERIAL =
+    '### 查询 [work] Showtime! VA-11 HALL-A 场景\n#### 来源页：Steam 社区\nURL: https://steamcommunity.com/app/639470\n开场是调酒教学关卡，Jill 在吧台边教调酒。';
+
+  it('材料存在 → 提炼调用不开 web_search、prompt 含来源 URL，笔记照常出口', async () => {
+    const { calls } = stubScript([
+      { content: searchJson([NOTE_WORK]) },
+      { content: evalJson(true) },
+    ]);
+    const searcher = vi.fn(async () => MATERIAL);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    expect(searcher).toHaveBeenCalledTimes(1);
+    // 提炼那次 chat：普通 prompt token（无 web_search）+ JSON 模式
+    expect(calls[0]?.web_search).toBeUndefined();
+    expect(calls[0]?.response_format).toEqual({ type: 'json_object' });
+    expect(calls[0]?.messages?.[1]?.content).toContain('steamcommunity.com/app/639470');
+    expect(notes.notes).toEqual([NOTE_WORK]);
+  });
+
+  it('材料为空 → 不发提炼 chat，轮数照记，质检正常收口', async () => {
+    const { calls } = stubScript([{ content: evalJson(true) }]);
+    const searcher = vi.fn(async () => null);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    expect(searcher).toHaveBeenCalledTimes(1);
+    // 只有一次 chat，且是质检（JSON 模式），不是提炼
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.response_format).toEqual({ type: 'json_object' });
+    expect(calls[0]?.messages?.[0]?.content).toContain('案头质检');
+    expect(notes.notes).toEqual([]);
+  });
+
+  it('补搜轮用质检给的查询：searcher 第二次收到的 q 是 refine 的', async () => {
+    const seenQueries: string[][] = [];
+    const searcher = vi.fn(async (queries: { q: string }[]) => {
+      seenQueries.push(queries.map((x) => x.q));
+      return seenQueries.length === 1 ? MATERIAL : '';
+    });
+    stubScript([
+      { content: searchJson([NOTE_MUSIC]) },
+      { content: evalJson(false, [{ lane: 'community', q: 'VA-11 Showtime 玩家 原话 评价' }]) },
+      { content: searchJson([NOTE_COMMUNITY]) },
+      { content: evalJson(true) },
+    ]);
+    const notes = await createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief);
+    expect(seenQueries).toHaveLength(2);
+    expect(seenQueries[1]).toEqual(['VA-11 Showtime 玩家 原话 评价']);
+    expect(notes.notes).toEqual([NOTE_MUSIC, NOTE_COMMUNITY]);
+  });
+
+  it('searcher 首轮全挂 → 照旧上抛（producer onError 契约不变）', async () => {
+    stubScript([{ content: 'should not run' }]);
+    const searcher = async () => {
+      throw new Error('SearXNG 没起');
+    };
+    await expect(createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief)).rejects.toThrow(
+      'SearXNG 没起',
+    );
+  });
+
+  it('外部 abort → searcher 拿到同一 signal；上抛保持 AbortError 名', async () => {
+    const controller = new AbortController();
+    let sawSignal: AbortSignal | undefined;
+    const searcher = async (_q: unknown, _d: number, signal?: AbortSignal) => {
+      sawSignal = signal;
+      await new Promise((_r, rej) => {
+        const abort = () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort);
+      });
+      return MATERIAL;
+    };
+    stubScript([{ content: 'should not run' }]);
+    const pending = createDeskAgentLlm(baseOpts, searcher).researchDesk!(brief, controller.signal);
+    const failure = pending.catch((e: unknown) => e as Error);
+    // 等 searcher 真实进入（不猜时长）
+    while (sawSignal === undefined) await Promise.resolve();
+    controller.abort();
+    const err = await failure;
+    expect(err.name).toBe('AbortError');
+  });
+
+  it('webSearch 关闭但 searcher 在场 → 案头照常跑（本地路不依赖方舟搜索通道）', async () => {
+    stubScript([{ content: searchJson([NOTE_WORK]) }, { content: evalJson(true) }]);
+    const searcher = vi.fn(async () => MATERIAL);
+    const notes = await createDeskAgentLlm({ ...baseOpts, webSearch: false }, searcher)
+      .researchDesk!(brief);
+    expect(searcher).toHaveBeenCalledTimes(1);
+    expect(notes.notes).toEqual([NOTE_WORK]);
+  });
+});
+
 describe('图结构（裸节点级）', () => {
   it('search 节点：预算已尽即 stop，不发请求', async () => {
     const { calls } = stubScript([{ content: searchJson([]) }]);

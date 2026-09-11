@@ -1,7 +1,13 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
-import { createDeskAgentLlm, createStore, createTts, systemClock } from '@mock-radio/adapters';
+import {
+  createDeskAgentLlm,
+  createLocalDeskSearcher,
+  createStore,
+  createTts,
+  systemClock,
+} from '@mock-radio/adapters';
 import { getDayPartContext } from '@mock-radio/core';
 import { loadStationConfig } from './config';
 import { loadEnvFile } from './env';
@@ -35,18 +41,25 @@ async function main(): Promise<void> {
     .join(' ');
 
   // 密钥工厂：每次调用都从 process.env 现取——设置面板写入 .env 后重建即生效
-  // 案头检索走 LangGraph 多轮图（search→evaluate↺，整图挂钟预算 deskTimeoutMs）
+  // 案头检索：默认走本地管道（SearXNG+抓页，普通 token）；关 = 回方舟 web_search（贵 token）。
+  // SearXNG 没起时 searcher 抛错 → search 节点首轮上抛 → producer onError 空案头，可接受降级。
+  const deskSearcher = config.llm.deskLocalSearch
+    ? createLocalDeskSearcher({ searxngUrl: config.llm.searxngUrl ?? 'http://127.0.0.1:8888' })
+    : undefined;
   const llmFactory = () =>
-    createDeskAgentLlm({
-      baseUrl: config.llm.baseUrl,
-      apiKey: process.env[config.llm.apiKeyEnv] ?? '',
-      model: config.llm.model,
-      temperature: config.llm.temperature,
-      webSearch: config.llm.webSearch,
-      timeoutMs: config.llm.timeoutMs,
-      maxTokens: config.llm.maxTokens,
-      deskTimeoutMs: config.llm.deskTimeoutMs,
-    });
+    createDeskAgentLlm(
+      {
+        baseUrl: config.llm.baseUrl,
+        apiKey: process.env[config.llm.apiKeyEnv] ?? '',
+        model: config.llm.model,
+        temperature: config.llm.temperature,
+        webSearch: config.llm.webSearch,
+        timeoutMs: config.llm.timeoutMs,
+        maxTokens: config.llm.maxTokens,
+        deskTimeoutMs: config.llm.deskTimeoutMs,
+      },
+      deskSearcher,
+    );
   const ttsFactory = () =>
     createTts({
       provider: config.tts.provider,

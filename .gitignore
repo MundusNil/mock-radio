@@ -19,6 +19,7 @@ data/
 .agents/
 .codegraph/
 .scratch/
+.tmp/
 
 # 曲库音频：目录结构进 git，音频文件不进（任意嵌套）
 config/library/**/*.mp3

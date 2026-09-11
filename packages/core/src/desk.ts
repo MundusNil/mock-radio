@@ -96,6 +96,25 @@ ${listed}
   };
 }
 
+/** 本地检索管道用：模型不开 web_search，只从给定网页材料提炼笔记（与联网路同一 JSON 契约）。 */
+export function buildDeskExtractPrompt(brief: DeskResearchBrief, material: string): SegmentPrompt {
+  const listed = brief.queries.map((q, i) => `${i + 1}. [${q.lane}] ${q.q}`).join('\n');
+  const work = brief.artist?.trim();
+  return {
+    system: `你是电台案头编辑，不是主播。不要写口播。
+下面给你的是刚抓回的网页材料（搜索引擎结果 + 页面正文摘录）。只从材料里提炼，材料里没有的一律不写，不许用你的记忆补：
+${listed}
+每条不超过 40 字。只留下可核对的具体事实：场景/关卡/角色名、一句玩家原话（注明来源页）、一条针对这首（不是整张专辑）的乐评。
+材料里的人名、场景名、玩家原话照抄保留，不要总结成「玩家普遍觉得」这类没有名字的共识。
+材料覆盖不到的 lane 留空，不要硬凑。
+只输出 JSON：{"notes":[{"lane":"work"|"community"|"music","text":"..."}]}`,
+    user: `曲目：${brief.title}${work ? ` / ${work}` : ''}
+【网页材料】
+${material}
+按三条方向提炼，有就写，没有就空。`,
+  };
+}
+
 function asLane(raw: unknown): DeskLane | null {
   if (typeof raw !== 'string') return null;
   return LANE_FROM_RAW[raw.trim()] ?? null;

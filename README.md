@@ -39,7 +39,7 @@ pnpm start              # 体检环境 → 曲库自动入库 → 拉起电台 +
 - **TTS**：默认 **MiniMax 云端**（不需要本地 Python）。只有跑 `pnpm voice:compare`（edge-tts 音色盲听）或把 `tts.provider` 改回 `edge-tts` 时才需要 `pnpm setup:voice`
 - **FFmpeg**：`pnpm setup:ffmpeg` 一键装进仓库（Windows 拉 gyan.dev 官方 zip，Linux 拉 johnvansickle 静态构建，macOS 走 brew）；已有系统 ffmpeg 则跳过。手动兜底：`winget install Gyan.FFmpeg` / `brew install ffmpeg` / `apt install ffmpeg`
 - **习惯 `.env` 管理密钥**：`cp .env.example .env` 后填入，效果同面板
-- **端口**：电台 `:9730`、面板 `:9731`；`pnpm stop` 回收残留进程
+- **案头本地检索（默认开启）**：需要 Docker——`pnpm search:up` 拉起本地 SearXNG（:8888），电台的曲目笔记就从它查网页+抓正文提炼（免费，来源 URL 可回查）。容器没起时案头自动降级为空笔记（音乐不受影响）；不想用 Docker 就在 `config/station.config.json` 把 `llm.deskLocalSearch` 改为 `false`，回方舟模型自带搜索
 
 </details>
 
@@ -58,6 +58,7 @@ pnpm start              # 体检环境 → 曲库自动入库 → 拉起电台 +
 | `pnpm setup:ffmpeg` | 首次部署补齐 FFmpeg（装进 `tools/ffmpeg/`） |
 | `pnpm scan` | 手动重扫曲库（通常不需要，启动时自检） |
 | `pnpm voice:compare` | TTS 音色盲听对比（挑她的声音） |
+| `pnpm search:up` / `search:down` / `search:status` | 案头本地检索的 SearXNG 容器：起 / 停 / 探活 |
 | `pnpm test` / `pnpm check` | Vitest 全量 / Biome lint + 格式 |
 
 调电台 = 改 **`config/station.config.json`**（改完重启生效）：

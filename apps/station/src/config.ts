@@ -43,6 +43,10 @@ export interface LlmConfig {
   temperature: number;
   /** 模型内置联网搜索（豆包/方舟支持；DeepSeek 不支持） */
   webSearch: boolean;
+  /** 案头检索走本地管道（SearXNG+抓页→普通 token 提炼）；false 走方舟 web_search（贵 token） */
+  deskLocalSearch: boolean;
+  /** 本地 SearXNG 实例地址（pnpm search:up 拉起，默认 http://127.0.0.1:8888） */
+  searxngUrl?: string;
   /** 多轮案头的整图挂钟预算（ms）；缺省 90000（adapters 默认） */
   deskTimeoutMs?: number;
   /** 单次请求超时（ms）；必须短于 pendingTimeout，给 TTS 留窗口。思考模型口播实测可近 50s。 */
@@ -171,6 +175,7 @@ export function loadStationConfig(
       apiKeyEnv: 'ARK_API_KEY',
       temperature: 0.8,
       webSearch: true,
+      deskLocalSearch: true,
       timeoutMs: 60_000,
       maxTokens: 2500,
       maxSegmentChars: 180,

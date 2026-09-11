@@ -71,6 +71,7 @@ beforeAll(() => {
       apiKeyEnv: 'X',
       temperature: 0.8,
       webSearch: false,
+      deskLocalSearch: false,
       timeoutMs: 1000,
       maxTokens: 100,
       maxSegmentChars: 100,

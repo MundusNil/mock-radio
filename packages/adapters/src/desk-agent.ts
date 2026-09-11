@@ -18,9 +18,10 @@ import type {
   DeskResearchBrief,
   LlmClient,
 } from '@mock-radio/core';
-import { buildDeskResearchPrompt, parseDeskNotes } from '@mock-radio/core';
+import { buildDeskExtractPrompt, buildDeskResearchPrompt, parseDeskNotes } from '@mock-radio/core';
 import type { ChatFn, OpenAiCompatibleOptions } from './llm';
 import { createChat, createOpenAiCompatibleLlm, DEFAULT_DESK_TIMEOUT_MS } from './llm';
+import type { DeskSearcher } from './local-search';
 
 const MAX_ROUNDS = 3;
 const MAX_TOTAL_NOTES = 3;
@@ -83,23 +84,45 @@ type DeskAgentView = typeof DeskAgentState.State;
 type DeskAgentUpdate = typeof DeskAgentState.Update;
 type NodeConfig = { signal?: AbortSignal };
 
-export function createDeskAgentGraph(chat: ChatFn) {
+export function createDeskAgentGraph(chat: ChatFn, searcher?: DeskSearcher) {
   async function search(state: DeskAgentView, config: NodeConfig): Promise<DeskAgentUpdate> {
     if (state.stop || Date.now() >= state.deadlineAt) return { stop: true };
-    const prompt = buildDeskResearchPrompt({ ...state.brief, queries: state.queries });
     try {
-      const text = await chat(
-        [
-          { role: 'system' as const, content: prompt.system },
-          { role: 'user' as const, content: prompt.user },
-        ],
-        {
-          webSearch: true,
-          disableThinking: true,
-          timeoutMs: Math.max(1, state.deadlineAt - Date.now()),
-          signal: config.signal,
-        },
-      );
+      let text: string;
+      if (searcher) {
+        // 本地管道：检索（免费）→ 普通 token 提炼。材料为空 = 这轮没捞到可读页面，
+        // 轮数照记，交质检决定补搜还是收手。
+        const material = await searcher(state.queries, state.deadlineAt, config.signal);
+        if (material === null) return { round: state.round + 1 };
+        const prompt = buildDeskExtractPrompt({ ...state.brief, queries: state.queries }, material);
+        text = await chat(
+          [
+            { role: 'system' as const, content: prompt.system },
+            { role: 'user' as const, content: prompt.user },
+          ],
+          {
+            webSearch: false,
+            jsonObject: true,
+            disableThinking: true,
+            timeoutMs: Math.max(1, state.deadlineAt - Date.now()),
+            signal: config.signal,
+          },
+        );
+      } else {
+        const prompt = buildDeskResearchPrompt({ ...state.brief, queries: state.queries });
+        text = await chat(
+          [
+            { role: 'system' as const, content: prompt.system },
+            { role: 'user' as const, content: prompt.user },
+          ],
+          {
+            webSearch: true,
+            disableThinking: true,
+            timeoutMs: Math.max(1, state.deadlineAt - Date.now()),
+            signal: config.signal,
+          },
+        );
+      }
       return {
         notes: parseDeskNotes(text, state.brief.trackId, state.queries).notes,
         round: state.round + 1,
@@ -167,17 +190,23 @@ lane 只能是 work/community/music，每条不超过 25 字，问具体的不�
     .compile();
 }
 
-/** createOpenAiCompatibleLlm 的 drop-in 替代：只有 researchDesk 走图，其余原样委托。 */
-export function createDeskAgentLlm(options: OpenAiCompatibleOptions): LlmClient {
+/** createOpenAiCompatibleLlm 的 drop-in 替代：只有 researchDesk 走图，其余原样委托。
+ * searcher 传入 = 案头检索走本地管道（SearXNG+抓页，普通 token 提炼）；
+ * 不传 = 走方舟 web_search（模型自带搜索，贵 token）。 */
+export function createDeskAgentLlm(
+  options: OpenAiCompatibleOptions,
+  searcher?: DeskSearcher,
+): LlmClient {
   const base = createOpenAiCompatibleLlm(options);
   const deskTimeoutMs = options.deskTimeoutMs ?? DEFAULT_DESK_TIMEOUT_MS;
   const chat = createChat(options);
-  const graph = createDeskAgentGraph(chat);
+  const graph = createDeskAgentGraph(chat, searcher);
 
   return {
     ...base,
     async researchDesk(brief: DeskResearchBrief, signal?: AbortSignal): Promise<DeskNotes> {
-      if (!options.webSearch) {
+      // 本地管道不依赖方舟搜索通道；只有走 web_search 路时开关才拦
+      if (!searcher && !options.webSearch) {
         return { trackId: brief.trackId, queries: brief.queries, notes: [] };
       }
       const state = await graph.invoke(
