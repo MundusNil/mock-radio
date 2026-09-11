@@ -440,7 +440,7 @@ describe('段落生产 · 案头', () => {
     expect(user).toContain('案头这次没摸到能站住的条目');
   });
 
-  it('空笔记不写入缓存，下次开口会再搜', async () => {
+  it('搜完确实 0 条 → 负缓存，同进程不再重烧', async () => {
     let researchCalls = 0;
     const producer = createSegmentProducer({
       llm: {
@@ -448,14 +448,7 @@ describe('段落生产 · 案头', () => {
         extractMemories: async () => [],
         researchDesk: async (brief) => {
           researchCalls += 1;
-          if (researchCalls === 1) {
-            return { trackId: brief.trackId, queries: brief.queries, notes: [] };
-          }
-          return {
-            trackId: brief.trackId,
-            queries: brief.queries,
-            notes: [{ lane: 'work', text: 'Jill 在吧台开班前放' }],
-          };
+          return { trackId: brief.trackId, queries: brief.queries, notes: [] };
         },
       },
       tts: ttsOk,
@@ -473,6 +466,35 @@ describe('段落生产 · 案头', () => {
     await producer.produce({ id: 'seg-empty-1', kind: 'interlude' });
     expect(researchCalls).toBe(1);
     await producer.produce({ id: 'seg-empty-2', kind: 'interlude' });
+    expect(researchCalls).toBe(1);
+  });
+
+  it('案头抛错（容器挂）不算 0 条：负缓存不记它，下次仍重试', async () => {
+    let researchCalls = 0;
+    const producer = createSegmentProducer({
+      llm: {
+        generateSegment: async () => ({ text: '鼓点一直压着，不催。', songRequest: null }),
+        extractMemories: async () => [],
+        researchDesk: async () => {
+          researchCalls += 1;
+          throw new Error('SearXNG 无响应');
+        },
+      },
+      tts: ttsOk,
+      persona: PERSONA,
+      stationName: '梦可电台',
+      hostName: '梦可',
+      retrieveMemories: () => [],
+      tracks: [track],
+      view: () => ({
+        now: Date.UTC(2026, 7, 19, 12, 0, 0),
+        currentTrack: track,
+        recentTracks: [],
+      }),
+      onError: () => undefined,
+    });
+    await producer.produce({ id: 'seg-err-1', kind: 'interlude' });
+    await producer.produce({ id: 'seg-err-2', kind: 'interlude' });
     expect(researchCalls).toBe(2);
   });
 });

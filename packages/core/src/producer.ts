@@ -91,10 +91,13 @@ function delay(ms: number, signal?: AbortSignal): Promise<'timeout'> {
 export function createSegmentProducer(options: SegmentProducerOptions): SegmentProducer {
   const cache = new Map<string, DeskNotes>();
   const inflight = new Map<string, Promise<DeskNotes>>();
+  // 负缓存：搜完确实 0 条的冷门票曲，本进程内不再整轮重烧（请求量≈上游 BAN 风险；
+  // 且同样材料再提炼一遍大概率还是 0 条）。刻意活不过重启——引擎/白名单修好后自愈。
+  const empty = new Set<string>();
 
   function prefetch(track: Track): void {
     if (!options.llm.researchDesk) return;
-    if (cache.has(track.id) || inflight.has(track.id)) return;
+    if (cache.has(track.id) || inflight.has(track.id) || empty.has(track.id)) return;
     const queries = planDeskQueries(track);
     const pending = options.llm
       .researchDesk({
@@ -106,6 +109,7 @@ export function createSegmentProducer(options: SegmentProducerOptions): SegmentP
       })
       .then((notes) => {
         if (notes.notes.length > 0) cache.set(track.id, notes);
+        else empty.add(track.id);
         return notes;
       })
       .catch((err: unknown) => {
