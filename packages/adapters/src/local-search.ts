@@ -12,11 +12,11 @@ import type { DeskQuery } from '@mock-radio/core';
 export interface LocalSearchOptions {
   /** SearXNG 实例地址，如 http://127.0.0.1:8888 */
   searxngUrl: string;
-  /** 每条查询取几个结果做抓取候选 */
+  /** 每条查询向 SearXNG 取几个候选（沿用 Google 一页 10 条惯例） */
   maxResults?: number;
   /** 单页抓取超时（ms） */
   fetchTimeoutMs?: number;
-  /** 喂给模型的总字符预算 */
+  /** 喂给模型的总字符预算——决定实际抓几页，不单独设页数 */
   maxMaterialChars?: number;
 }
 
@@ -83,11 +83,18 @@ function fetchable(url: string): boolean {
 
 type SearxResult = { title?: string; url?: string; content?: string };
 
+/** 单页正文进材料的字符上限 */
+const PER_PAGE_CHARS = 2_200;
+
+/**
+ * 抓几页不固定死（Google 式的分配思路）：候选池 = 每查询 10 条（一页惯例），
+ * 抓取深度由总材料预算驱动——按名次轮转（各查询先抢第 1 名，再第 2 名……），
+ * 预算/挂钟耗尽自然停。料厚的查询自动多分几页，料薄的自动少分。跨查询 URL 去重。
+ */
 export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearcher {
-  const maxResults = options.maxResults ?? 3;
+  const maxResults = options.maxResults ?? 10;
   const fetchTimeoutMs = options.fetchTimeoutMs ?? 8_000;
   const maxMaterialChars = options.maxMaterialChars ?? 20_000;
-  const PER_PAGE_CHARS = 2_200;
 
   return async function search(queries, deadlineAt, signal) {
     const remaining = () => deadlineAt - Date.now();
@@ -118,50 +125,81 @@ export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearch
     for (const p of perQuery)
       if (p.status === 'rejected') console.error('[local-search] 查询失败，跳过：', p.reason);
 
-    // 2) 每条查询抓 top-1 页面正文，摘要兜底
+    // 2) 按名次轮转抓正文，预算/挂钟耗尽即停
+    const pools = queries.map((q, i) => ({
+      q,
+      head: `### 查询 [${q.lane}] ${q.q}`,
+      top:
+        perQuery[i]?.status === 'fulfilled'
+          ? (perQuery[i] as { value: SearxResult[] }).value.slice(0, maxResults)
+          : [],
+      parts: [] as string[],
+    }));
+    const usable = pools.filter((p) => p.top.length > 0);
+    const seen = new Set<string>();
+    let used = 0;
+    const pageOf = async (r: SearxResult): Promise<string | null> => {
+      const res = await fetch(r.url as string, {
+        redirect: 'follow',
+        signal: AbortSignal.any([
+          signal ?? new AbortController().signal,
+          AbortSignal.timeout(Math.min(fetchTimeoutMs, remaining())),
+        ]),
+        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8' },
+      });
+      if (!res.ok) return null;
+      const text = keepProse(htmlToText(await res.text())).slice(0, PER_PAGE_CHARS);
+      return text.length > 80 ? `#### 来源页：${r.title ?? ''}\nURL: ${r.url}\n${text}` : null;
+    };
+    for (let rank = 0; rank < maxResults && remaining() > 1_500; rank += 1) {
+      // 先到先得：同轮多查询命中同 URL，只让第一家用（重复正文=白烧 token），后者下轮补位
+      const picks: (typeof usable)[number][] = [];
+      for (const p of usable) {
+        const u = p.top[rank]?.url;
+        if (!u || seen.has(u)) continue;
+        seen.add(u);
+        picks.push(p);
+      }
+      if (picks.length === 0) break;
+      const got = await Promise.allSettled(picks.map((p) => pageOf(p.top[rank] as SearxResult)));
+      let added = 0;
+      for (let j = 0; j < picks.length; j += 1) {
+        const g = got[j];
+        const pick = picks[j];
+        if (!pick) continue;
+        if (g?.status === 'fulfilled' && g.value) {
+          pick.parts.push(g.value);
+          added += g.value.length;
+        } else if (
+          g?.status === 'rejected' &&
+          (g.reason as Error)?.name === 'AbortError' &&
+          signal?.aborted
+        ) {
+          throw g.reason;
+        }
+      }
+      used += added;
+      // 预算装不下下一轮（一页 + 节头 + 余量）就收工
+      if (used + PER_PAGE_CHARS + 300 > maxMaterialChars) break;
+    }
+
+    // 3) 拼节：正文在前；没拿到正文的查询退摘要兜底
     const sections: string[] = [];
     let budget = maxMaterialChars;
     let any = false;
-    for (let i = 0; i < queries.length && budget > 500; i += 1) {
-      const got = perQuery[i];
-      const q = queries[i];
-      if (!got || !q || got.status !== 'fulfilled') continue;
-      const head = `### 查询 [${q.lane}] ${q.q}`;
-      const top: SearxResult[] = got.value.slice(0, maxResults);
-      const parts: string[] = [];
-      const first = top[0];
-      if (first) {
-        try {
-          const res = await fetch(first.url as string, {
-            redirect: 'follow',
-            signal: AbortSignal.any([
-              signal ?? new AbortController().signal,
-              AbortSignal.timeout(Math.min(fetchTimeoutMs, remaining())),
-            ]),
-            headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8' },
-          });
-          if (res.ok) {
-            const text = keepProse(htmlToText(await res.text())).slice(0, PER_PAGE_CHARS);
-            if (text.length > 80)
-              parts.push(`#### 来源页：${first.title ?? ''}\nURL: ${first.url}\n${text}`);
-          }
-        } catch (err) {
-          if ((err as Error).name === 'AbortError' && signal?.aborted) throw err;
-          // 抓不到正文：退而用搜索摘要
-        }
-      }
-      if (parts.length === 0) {
-        const snips = top
+    for (const p of pools) {
+      const parts = [...p.parts];
+      if (parts.length === 0 && p.top.length > 0) {
+        const snips = p.top
           .map((r) => `- ${r.title ?? ''}｜${r.content ?? ''}｜${r.url ?? ''}`)
           .join('\n');
         if (snips) parts.push(`#### 搜索摘要（正文未取回）\n${snips}`);
       }
-      if (parts.length > 0) {
-        const section = [head, ...parts].join('\n');
-        sections.push(section.slice(0, budget));
-        budget -= section.length;
-        any = true;
-      }
+      if (parts.length === 0 || budget <= 500) continue;
+      const section = [p.head, ...parts].join('\n');
+      sections.push(section.slice(0, budget));
+      budget -= section.length;
+      any = true;
     }
     return any ? sections.join('\n\n') : null;
   };

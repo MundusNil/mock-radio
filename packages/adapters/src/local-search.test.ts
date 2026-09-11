@@ -81,7 +81,7 @@ describe('htmlToText / keepProse', () => {
 });
 
 describe('createLocalDeskSearcher', () => {
-  it('正常路：三路并发查询，各抓 top-1 正文，材料带来源 URL 且按 lane 分节', async () => {
+  it('正常路：三路并发查询，各抓正文，材料带来源 URL 且按 lane 分节', async () => {
     const urls = stubFetch([
       searxOk('Showtime VA-11 场景', [r('https://a.test/p1')]),
       searxOk('Showtime 玩家 原话', [r('https://b.test/p2')]),
@@ -101,6 +101,30 @@ describe('createLocalDeskSearcher', () => {
     expect(material).toContain('A: Jill said');
     // 导航短行不进材料，正文长句进
     expect(material).not.toContain('Home');
+  });
+
+  it('抓取深度自适应：好 lane 抓到第 2 名；跨 lane 重复 URL 只抓一次；缺席 lane 不占额度', async () => {
+    const urls = stubFetch([
+      searxOk('Showtime VA-11 场景', [r('https://a.test/p1'), r('https://a.test/p2')]),
+      searxOk('Showtime 玩家 原话', [r('https://a.test/p1'), r('https://b.test/p1')]),
+      searxOk('Showtime 编曲 乐器', [r('https://c.test/p1')]),
+      { match: 'https://a.test/p1', text: PAGE('A1') },
+      { match: 'https://a.test/p2', text: PAGE('A2') },
+      { match: 'https://b.test/p1', text: PAGE('B1') },
+      { match: 'https://c.test/p1', text: PAGE('C1') },
+    ]);
+    const material = await createLocalDeskSearcher({ searxngUrl: 'http://sx.test' })(
+      QUERIES,
+      FAR(),
+    );
+    // 去重：a/p1 被两条查询命中，只发一次页面请求
+    expect(urls.filter((u) => u === 'https://a.test/p1')).toHaveLength(1);
+    // 轮转：work 拿到第 2 名页；community 第 1 名是重复 URL→本轮缺席、第 2 名补上
+    expect(material).toContain('URL: https://a.test/p2');
+    expect(material).toContain('URL: https://b.test/p1');
+    expect(material).toContain('URL: https://c.test/p1');
+    const work = material?.split('### 查询')[1] ?? '';
+    expect((work.match(/#### 来源页/g) ?? []).length).toBe(2);
   });
 
   it('黑名单域跳过：GameFAQs 结果不进抓取候选，落到下一条可读源', async () => {
