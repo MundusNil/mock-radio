@@ -271,4 +271,69 @@ describe('createLocalDeskSearcher', () => {
     );
     expect(material).toBeNull();
   });
+
+  describe('SERP 最小间隔（防连发打引擎）', () => {
+    /** 假时钟：Date.now 冻结、sleep 手动推进——禁真 timer 规矩。 */
+    function fakeClock(start = 1_000_000) {
+      let now = start;
+      vi.spyOn(Date, 'now').mockImplementation(() => now);
+      const sleeps: number[] = [];
+      const sleep = async (ms: number) => {
+        sleeps.push(ms);
+        now += ms;
+      };
+      return { sleeps, sleep, deadline: (ms: number) => now + ms };
+    }
+
+    const SERP_STUBS: Stub[] = [
+      searxOk('Showtime VA-11 场景', []),
+      searxOk('Showtime 玩家 原话', []),
+      searxOk('Showtime 编曲 乐器', []),
+    ];
+
+    it('gap=350 → 三路 SERP 串行，相邻间隔恰为 gap；请求数不变', async () => {
+      const clock = fakeClock();
+      const urls = stubFetch(SERP_STUBS);
+      await createLocalDeskSearcher({
+        searxngUrl: 'http://sx.test',
+        serpMinGapMs: 350,
+        sleep: clock.sleep,
+      })(QUERIES, clock.deadline(60_000));
+      expect(urls.filter((u) => u.startsWith('http://sx.test/search'))).toHaveLength(3);
+      // 第一发不排队，其后各排一个 gap
+      expect(clock.sleeps).toEqual([350, 350]);
+    });
+
+    it('挂钟不够排队 → 后面的发放弃发送，已发的照常出材料', async () => {
+      const clock = fakeClock();
+      stubFetch([
+        searxOk('Showtime VA-11 场景', [r('https://a.test/p1')]),
+        searxOk('Showtime 玩家 原话', []),
+        searxOk('Showtime 编曲 乐器', []),
+        { match: 'https://a.test/p1', text: PAGE('A') },
+      ]);
+      // 只剩 1.5s：第 1 发直发；第 2 发排 350 后仍余 >1s；第 3 发排队后 <1s → 弃权
+      const material = await createLocalDeskSearcher({
+        searxngUrl: 'http://sx.test',
+        serpMinGapMs: 350,
+        sleep: clock.sleep,
+      })(QUERIES, clock.deadline(1_500));
+      expect(clock.sleeps).toEqual([350]);
+      // work 已发出并出材料；music（第 3 发）被弃权
+      expect(material).toContain('### 查询 [work]');
+      expect(material).not.toContain('### 查询 [music]');
+    });
+
+    it('gap=0（默认）→ 完全不排队，零 sleep', async () => {
+      const clock = fakeClock();
+      const urls = stubFetch(SERP_STUBS);
+      await createLocalDeskSearcher({
+        searxngUrl: 'http://sx.test',
+        serpMinGapMs: 0,
+        sleep: clock.sleep,
+      })(QUERIES, clock.deadline(60_000));
+      expect(urls.filter((u) => u.startsWith('http://sx.test/search'))).toHaveLength(3);
+      expect(clock.sleeps).toEqual([]);
+    });
+  });
 });

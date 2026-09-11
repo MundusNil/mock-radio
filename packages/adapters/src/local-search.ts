@@ -18,6 +18,10 @@ export interface LocalSearchOptions {
   fetchTimeoutMs?: number;
   /** 喂给模型的总字符预算——决定实际抓几页，不单独设页数 */
   maxMaterialChars?: number;
+  /** 相邻 SearXNG 请求最小间隔（ms）；0=不限流。同实例多轨共用一条队列，防连发打封引擎。 */
+  serpMinGapMs?: number;
+  /** 测试注入：假时间推进器。生产用默认真 timer。 */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** 一轮执行全部查询，返回拼好的「网页材料」文本；无可读结果时返回 null；检索全挂时抛错。 */
@@ -95,6 +99,9 @@ function infoboxPart(b: SearxInfobox): string | null {
 /** 单页正文进材料的字符上限 */
 const PER_PAGE_CHARS = 2_200;
 
+/** 排队后再发也要给这次请求留的挂钟余量；不足就放弃这次发（与入口 1 秒门槛同约定） */
+const SERP_RESERVE_MS = 1_000;
+
 /**
  * 抓几页不固定死（Google 式的分配思路）：候选池 = 每查询 10 条（一页惯例），
  * 抓取深度由总材料预算驱动——按名次轮转（各查询先抢第 1 名，再第 2 名……），
@@ -104,14 +111,44 @@ export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearch
   const maxResults = options.maxResults ?? 10;
   const fetchTimeoutMs = options.fetchTimeoutMs ?? 8_000;
   const maxMaterialChars = options.maxMaterialChars ?? 20_000;
+  const serpMinGapMs = options.serpMinGapMs ?? 0;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  // 同实例内所有 search() 调用（含多轨并发）共用的 SERP 排队位
+  let lastSerpAt = 0;
+  let serpTail: Promise<void> = Promise.resolve();
+
+  /** 占用全局队位：排到距上次发出 ≥serpMinGapMs 之后；挂钟不够就放弃发送。 */
+  function serpSlot(remaining: () => number): Promise<number | null> {
+    const prev = serpTail;
+    let release!: () => void;
+    serpTail = new Promise<void>((r) => (release = r));
+    return prev.then(async () => {
+      try {
+        const wait = lastSerpAt + serpMinGapMs - Date.now();
+        if (wait > 0) {
+          if (remaining() - wait < SERP_RESERVE_MS) return null;
+          await sleep(wait);
+        }
+        if (remaining() < SERP_RESERVE_MS) return null;
+        const at = Date.now();
+        lastSerpAt = at;
+        return at;
+      } finally {
+        release();
+      }
+    });
+  }
 
   return async function search(queries, deadlineAt, signal) {
     const remaining = () => deadlineAt - Date.now();
     if (remaining() <= 1_000) return null;
 
-    // 1) SearXNG JSON API（本地实例，不开限流）
+    // 1) SearXNG JSON API（本地实例；serpMinGapMs>0 时全局排队防连发）
     const perQuery = await Promise.allSettled(
       queries.map(async (q): Promise<{ results: SearxResult[]; infoboxes: SearxInfobox[] }> => {
+        // 排队后挂钟已不够这一发：这路放弃（全放弃→材料空→null，交 search 节点降级）
+        if ((await serpSlot(remaining)) === null) return { results: [], infoboxes: [] };
         const url = `${options.searxngUrl.replace(/\/$/, '')}/search?format=json&q=${encodeURIComponent(q.q)}`;
         const res = await fetch(url, {
           signal: AbortSignal.any([
