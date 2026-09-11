@@ -42,15 +42,19 @@ export interface WsHandle {
   sendRaw(payload: string): void;
 }
 
-/** 连接电台事件流；断线 3s 后自动重连（收音机掉线自动重新调频） */
+/** 连接电台事件流；断线自动重连（收音机掉线自动重新调频）：指数退避 1s→30s + 抖动，连上即复位。 */
 export function connectWs(onEvent: (event: ServerEvent) => void, onOpen?: () => void): WsHandle {
   let closed = false;
   let ws: WebSocket | null = null;
+  let attempt = 0;
 
   function connect(): void {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.onopen = () => onOpen?.();
+    ws.onopen = () => {
+      attempt = 0;
+      onOpen?.();
+    };
     ws.onmessage = (msg) => {
       try {
         onEvent(JSON.parse(msg.data as string) as ServerEvent);
@@ -59,7 +63,11 @@ export function connectWs(onEvent: (event: ServerEvent) => void, onOpen?: () => 
       }
     };
     ws.onclose = () => {
-      if (!closed) setTimeout(connect, 3000);
+      if (closed) return;
+      // 重启窗口内别同步轰炸：base×2^n 封顶 30s，半幅随机打散各标签页重试时刻
+      const base = Math.min(1_000 * 2 ** attempt, 30_000);
+      attempt++;
+      setTimeout(connect, base / 2 + Math.random() * (base / 2));
     };
   }
 
