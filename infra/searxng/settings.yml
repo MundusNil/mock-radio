@@ -28,10 +28,12 @@ engines:
     disabled: true
   - name: baidu
     disabled: true
+  # wikipedia/wikidata 2026-09-11 复活：实测 SearXNG 侧没挂——results 为空但 infoboxes
+  # 带完整词条（之前判「挂」是管道只读 results 的假象）；上游反爬只封 SERP 抓取，API 直连 200。
   - name: wikipedia
-    disabled: true
+    disabled: false
   - name: wikidata
-    disabled: true
+    disabled: false
   # 镜像默认禁用、本机实测活的引擎显式启用
   - name: yandex
     disabled: false

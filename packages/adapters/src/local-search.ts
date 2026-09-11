@@ -82,6 +82,15 @@ function fetchable(url: string): boolean {
 }
 
 type SearxResult = { title?: string; url?: string; content?: string };
+type SearxInfobox = { infobox?: string; id?: string; content?: string };
+
+/** SearXNG 已替我们抽好的词条正文（wikipedia 引擎只走这个通道，results 恒空）。 */
+function infoboxPart(b: SearxInfobox): string | null {
+  if (typeof b.id !== 'string' || !fetchable(b.id)) return null;
+  const text = (b.content ?? '').trim().slice(0, PER_PAGE_CHARS);
+  if (text.length < 80) return null;
+  return `#### 词条：${b.infobox ?? ''}\nURL: ${b.id}\n${text}`;
+}
 
 /** 单页正文进材料的字符上限 */
 const PER_PAGE_CHARS = 2_200;
@@ -102,7 +111,7 @@ export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearch
 
     // 1) SearXNG JSON API（本地实例，不开限流）
     const perQuery = await Promise.allSettled(
-      queries.map(async (q): Promise<SearxResult[]> => {
+      queries.map(async (q): Promise<{ results: SearxResult[]; infoboxes: SearxInfobox[] }> => {
         const url = `${options.searxngUrl.replace(/\/$/, '')}/search?format=json&q=${encodeURIComponent(q.q)}`;
         const res = await fetch(url, {
           signal: AbortSignal.any([
@@ -112,8 +121,16 @@ export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearch
           headers: { 'User-Agent': UA },
         });
         if (!res.ok) throw new Error(`SearXNG HTTP ${res.status}`);
-        const data = (await res.json()) as { results?: SearxResult[] };
-        return (data.results ?? []).filter((r) => typeof r.url === 'string' && fetchable(r.url));
+        const data = (await res.json()) as {
+          results?: SearxResult[];
+          infoboxes?: SearxInfobox[];
+        };
+        return {
+          results: (data.results ?? []).filter(
+            (r) => typeof r.url === 'string' && fetchable(r.url),
+          ),
+          infoboxes: data.infoboxes ?? [],
+        };
       }),
     );
     // 查询全挂（SearXNG 没起）→ 抛错走 search 节点的降级/上抛契约
@@ -126,18 +143,37 @@ export function createLocalDeskSearcher(options: LocalSearchOptions): DeskSearch
       if (p.status === 'rejected') console.error('[local-search] 查询失败，跳过：', p.reason);
 
     // 2) 按名次轮转抓正文，预算/挂钟耗尽即停
-    const pools = queries.map((q, i) => ({
-      q,
-      head: `### 查询 [${q.lane}] ${q.q}`,
-      top:
+    const pools = queries.map((q, i) => {
+      const ok =
         perQuery[i]?.status === 'fulfilled'
-          ? (perQuery[i] as { value: SearxResult[] }).value.slice(0, maxResults)
-          : [],
-      parts: [] as string[],
-    }));
+          ? (
+              perQuery[i] as PromiseFulfilledResult<{
+                results: SearxResult[];
+                infoboxes: SearxInfobox[];
+              }>
+            ).value
+          : null;
+      return {
+        q,
+        head: `### 查询 [${q.lane}] ${q.q}`,
+        top: ok ? ok.results.slice(0, maxResults) : [],
+        boxes: ok ? ok.infoboxes.slice(0, 2) : [],
+        parts: [] as string[],
+      };
+    });
     const usable = pools.filter((p) => p.top.length > 0);
     const seen = new Set<string>();
     let used = 0;
+    // 词条免抓取、信息密度最高：直接占本 lane 材料头部（每查询 ≤2 条，跨查询按 URL 去重）
+    for (const p of pools) {
+      for (const b of p.boxes) {
+        const part = infoboxPart(b);
+        if (!part || seen.has(b.id as string)) continue;
+        seen.add(b.id as string);
+        p.parts.push(part);
+        used += part.length;
+      }
+    }
     const pageOf = async (r: SearxResult): Promise<string | null> => {
       const res = await fetch(r.url as string, {
         redirect: 'follow',

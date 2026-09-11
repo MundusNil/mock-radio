@@ -216,4 +216,59 @@ describe('createLocalDeskSearcher', () => {
     expect(material).toContain('### 查询 [work]');
     expect(material).not.toContain('### 查询 [music]');
   });
+
+  it('infoboxes 通道：wikipedia 只出词条不出 results——词条免抓取直接进 lane 头部', async () => {
+    const urls = stubFetch([
+      {
+        match: `http://sx.test/search?format=json&q=${encodeURIComponent('Showtime VA-11 场景')}`,
+        json: {
+          results: [],
+          infoboxes: [
+            {
+              infobox: 'VA-11 Hall-A',
+              id: 'https://en.wikipedia.org/wiki/VA-11_Hall-A',
+              content: `${'Sukeban Games 开发的 2016 视觉小说，玩家扮演酒保 Jill。'.repeat(4)}`,
+            },
+          ],
+        },
+      },
+      searxOk('Showtime 玩家 原话', []),
+      searxOk('Showtime 编曲 乐器', []),
+    ]);
+    const material = await createLocalDeskSearcher({ searxngUrl: 'http://sx.test' })(
+      QUERIES,
+      FAR(),
+    );
+    expect(material).toContain('#### 词条：VA-11 Hall-A');
+    expect(material).toContain('URL: https://en.wikipedia.org/wiki/VA-11_Hall-A');
+    expect(material).toContain('酒保 Jill');
+    // 词条免抓取：除了三条查询本身，零页面请求
+    expect(urls).toHaveLength(3);
+  });
+
+  it('infobox 短文本（<80 字）与黑名单域词条丢弃，不污染材料', async () => {
+    stubFetch([
+      {
+        match: `http://sx.test/search?format=json&q=${encodeURIComponent('Showtime VA-11 场景')}`,
+        json: {
+          results: [],
+          infoboxes: [
+            { infobox: '太短', id: 'https://en.wikipedia.org/wiki/Short', content: '一句话' },
+            {
+              infobox: '墙内',
+              id: 'https://www.reddit.com/wiki/x',
+              content: `${'足够长的正文内容，重复多次以越过八十字符门槛，继续重复多次以越过门槛。'.repeat(3)}`,
+            },
+          ],
+        },
+      },
+      searxOk('Showtime 玩家 原话', []),
+      searxOk('Showtime 编曲 乐器', []),
+    ]);
+    const material = await createLocalDeskSearcher({ searxngUrl: 'http://sx.test' })(
+      QUERIES,
+      FAR(),
+    );
+    expect(material).toBeNull();
+  });
 });
