@@ -1,5 +1,6 @@
 export type { Clock } from './clock';
 export { systemClock } from './clock';
+export { createDeskAgentGraph, createDeskAgentLlm } from './desk-agent';
 export { probeDurationMs } from './ffprobe';
 export type { OpenAiCompatibleOptions } from './llm';
 export { createOpenAiCompatibleLlm } from './llm';

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
 import {
+  createDeskAgentLlm,
   createOpenAiCompatibleLlm,
   createStore,
   createTts,
@@ -40,8 +41,8 @@ async function main(): Promise<void> {
     .join(' ');
 
   // 密钥工厂：每次调用都从 process.env 现取——设置面板写入 .env 后重建即生效
-  const llmFactory = () =>
-    createOpenAiCompatibleLlm({
+  const llmFactory = () => {
+    const options = {
       baseUrl: config.llm.baseUrl,
       apiKey: process.env[config.llm.apiKeyEnv] ?? '',
       model: config.llm.model,
@@ -49,7 +50,11 @@ async function main(): Promise<void> {
       webSearch: config.llm.webSearch,
       timeoutMs: config.llm.timeoutMs,
       maxTokens: config.llm.maxTokens,
-    });
+      deskTimeoutMs: config.llm.deskTimeoutMs,
+    };
+    // 案头多轮 agent 可关：关掉即回到单轮 prompt，一条 config 完成回滚
+    return config.llm.deskAgent ? createDeskAgentLlm(options) : createOpenAiCompatibleLlm(options);
+  };
   const ttsFactory = () =>
     createTts({
       provider: config.tts.provider,

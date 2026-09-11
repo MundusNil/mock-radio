@@ -17,6 +17,9 @@ import {
   parseMemoryExtraction,
 } from '@mock-radio/core';
 
+/** 案头检索整图挂钟预算默认值（ms）——单轮与多轮共用单一来源 */
+export const DEFAULT_DESK_TIMEOUT_MS = 90_000;
+
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
   apiKey: string;
@@ -106,30 +109,30 @@ function parseDraft(raw: string): SegmentDraft {
   return { text: trimmed, songRequest: null };
 }
 
-export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): LlmClient {
+/** 单次 chat completion 请求（超时/取消/重试策略由调用方决定；researchDesk 图与 llm 工厂共用） */
+export type ChatFn = (
+  messages: Array<{ role: 'system' | 'user'; content: string }>,
+  opts?: {
+    webSearch?: boolean;
+    jsonObject?: boolean;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    disableThinking?: boolean;
+  },
+) => Promise<string>;
+
+export function createChat(options: OpenAiCompatibleOptions): ChatFn {
   const {
     baseUrl,
     apiKey,
     model,
     temperature = 0.8,
     timeoutMs = 30_000,
-    deskTimeoutMs = 90_000,
-    retries = 1,
     webSearch = false,
-    // 口播按纯文本解码；记忆提取仍走 JSON
     maxTokens = 2500,
   } = options;
 
-  async function chatOnce(
-    messages: Array<{ role: 'system' | 'user'; content: string }>,
-    opts: {
-      webSearch?: boolean;
-      jsonObject?: boolean;
-      signal?: AbortSignal;
-      timeoutMs?: number;
-      disableThinking?: boolean;
-    } = {},
-  ): Promise<string> {
+  return async function chatOnce(messages, opts = {}) {
     const useSearch = opts.webSearch ?? webSearch;
     const jsonObject = opts.jsonObject === true;
     const timeout = AbortSignal.timeout(opts.timeoutMs ?? timeoutMs);
@@ -161,7 +164,12 @@ export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): Llm
     const text = data.choices?.[0]?.message?.content?.trim();
     if (!text) throw new Error('LLM 空响应');
     return text;
-  }
+  };
+}
+
+export function createOpenAiCompatibleLlm(options: OpenAiCompatibleOptions): LlmClient {
+  const { deskTimeoutMs = DEFAULT_DESK_TIMEOUT_MS, retries = 1, webSearch = false } = options;
+  const chatOnce = createChat(options);
 
   return {
     async generateSegment(prompt: SegmentPrompt, extra?: AbortSignal): Promise<SegmentDraft> {
