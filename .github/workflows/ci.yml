@@ -1,0 +1,29 @@
+# 三件套门禁的自动化执行：AGENTS.md 铁律 5 规定「全绿才可进 PR」，此前纯靠自觉。
+# 单 ubuntu job：本机即 Windows，测试无平台专属路径（tts 合成用例自带 skipIf 守卫）。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # packageManager 字段（pnpm@12.3.4）是版本唯一真相，不在此处重复钉
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test
+      - run: pnpm check
+      - run: pnpm --filter @mock-radio/web build
