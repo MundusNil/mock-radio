@@ -43,8 +43,12 @@ async function main(): Promise<void> {
   // 密钥工厂：每次调用都从 process.env 现取——设置面板写入 .env 后重建即生效
   // 案头检索：默认走本地管道（SearXNG+抓页，普通 token）；关 = 回方舟 web_search（贵 token）。
   // SearXNG 没起时 searcher 抛错 → search 节点首轮上抛 → producer onError 空案头，可接受降级。
+  // SERP 350ms 最小间隔：多轨并发预取时防连发打同一实例触发引擎限流/BAN。
   const deskSearcher = config.llm.deskLocalSearch
-    ? createLocalDeskSearcher({ searxngUrl: config.llm.searxngUrl ?? 'http://127.0.0.1:8888' })
+    ? createLocalDeskSearcher({
+        searxngUrl: config.llm.searxngUrl ?? 'http://127.0.0.1:8888',
+        serpMinGapMs: 350,
+      })
     : undefined;
   const llmFactory = () =>
     createDeskAgentLlm(
