@@ -7,3 +7,41 @@ search:
   formats:
     - html
     - json
+# 本机出口 IP 打主流 SERP 太频繁会被反爬封禁（brave 429 / ddg CAPTCHA / mojeek 验证码页）。
+# 这些引擎显式禁用；保留 yandex / sogou / naver / ecosia / metager / marcia 等实测活口。
+# 若日志再现 "SearxEngineTooManyRequestsException"，把肇事引擎加进下面即可。
+engines:
+  # 被封/易封的显式禁用
+  - name: brave
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: google
+    disabled: true
+  - name: google cse
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: mojeek
+    disabled: true
+  - name: qwant
+    disabled: true
+  - name: baidu
+    disabled: true
+  - name: wikipedia
+    disabled: true
+  - name: wikidata
+    disabled: true
+  # 镜像默认禁用、本机实测活的引擎显式启用
+  - name: yandex
+    disabled: false
+  - name: ecosia
+    disabled: false
+  - name: marcia
+    disabled: false
+  - name: metager
+    disabled: false
+  - name: sogou
+    disabled: false
+  - name: naver
+    disabled: false
