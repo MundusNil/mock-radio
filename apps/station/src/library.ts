@@ -5,7 +5,7 @@ import { basename, extname, join, relative } from 'node:path';
 import { probeDurationMs } from '@mock-radio/adapters';
 import type { Track } from '@mock-radio/core';
 
-const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.wav', '.opus', '.aac']);
+export const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.wav', '.opus', '.aac']);
 
 /** 清洗曲名：去掉文件名开头的曲目序号（01. / 1-01 / [01]），歌名本身的数字保留。 */
 export function cleanTitle(filename: string): string {

@@ -17,10 +17,12 @@ describe('store · tracks', () => {
   it('upsert 按 path 幂等，不产生重复行', () => {
     const store = createStore(':memory:');
     store.upsertTracks([T('a', 'cafe/a.mp3'), T('b', 'cafe/b.mp3')]);
-    store.upsertTracks([T('a2', 'cafe/a.mp3')]); // 同 path，id 更新
+    store.upsertTracks([{ ...T('a2', 'cafe/a.mp3'), title: '改名' }]);
     const tracks = store.listTracks();
     expect(tracks).toHaveLength(2);
-    expect(tracks.find((t) => t.path === 'cafe/a.mp3')?.id).toBe('a2');
+    const a = tracks.find((t) => t.path === 'cafe/a.mp3');
+    expect(a?.id).toBe('a');
+    expect(a?.title).toBe('改名');
   });
 
   it('styles 数组往返完整', () => {
@@ -35,6 +37,16 @@ describe('store · tracks', () => {
       styles: ['cafe', 'night-quiet'],
       artist: '测试歌手',
     });
+  });
+
+  it('setTrackEnabled 后 upsert 不覆盖开关', () => {
+    const store = createStore(':memory:');
+    store.upsertTracks([T('a', 'cafe/a.mp3')]);
+    store.setTrackEnabled('a', false);
+    store.upsertTracks([{ ...T('a', 'cafe/a.mp3'), title: '新标题', enabled: true }]);
+    const row = store.listTracks()[0];
+    expect(row?.enabled).toBe(false);
+    expect(row?.title).toBe('新标题');
   });
 });
 

@@ -32,6 +32,8 @@ export interface Store {
   listTracks(): Track[];
   /** 删除 DB 中已不存在的曲目，并清掉对应播放记录（scan 清理：文件被删/移动后同步） */
   deleteTracksNotIn(paths: string[]): void;
+  /** 设置面板勾选：是否进入随机池（scan 再入库不得覆盖） */
+  setTrackEnabled(id: string, enabled: boolean): void;
   startPlay(trackId: string, startedAt: number): string;
   endPlay(id: string, endedAt: number): void;
   getLastUnfinishedPlay(): { id: string; trackId: string; startedAt: number } | null;
@@ -96,6 +98,10 @@ CREATE TABLE IF NOT EXISTS memories (
   last_used_at INTEGER,
   status TEXT NOT NULL DEFAULT 'active'
 );
+CREATE TABLE IF NOT EXISTS station_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 interface TrackRow {
@@ -131,13 +137,10 @@ export function createStore(dbPath: string): Store {
         INSERT INTO tracks (id, path, title, artist, duration_ms, styles_json, enabled, added_at)
         VALUES (@id, @path, @title, @artist, @durationMs, @stylesJson, @enabled, @addedAt)
         ON CONFLICT(path) DO UPDATE SET
-          id = excluded.id,
           title = excluded.title,
           artist = excluded.artist,
           duration_ms = excluded.duration_ms,
-          styles_json = excluded.styles_json,
-          enabled = excluded.enabled,
-          added_at = excluded.added_at
+          styles_json = excluded.styles_json
       `);
       const tx = db.transaction((rows: Array<Record<string, unknown>>) => {
         for (const row of rows) upsert.run(row);
@@ -323,6 +326,10 @@ export function createStore(dbPath: string): Store {
 
     touchMemory(id: string, at: number): void {
       db.prepare('UPDATE memories SET last_used_at = ? WHERE id = ?').run(at, id);
+    },
+
+    setTrackEnabled(id: string, enabled: boolean): void {
+      db.prepare('UPDATE tracks SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
     },
   };
 }

@@ -1140,6 +1140,243 @@ body {
   color: var(--fg-faint);
 }
 
+/* 曲库资源管理器 */
+.library-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.library-stat {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-xs);
+  min-inline-size: 0;
+}
+
+.library-crumb {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.library-crumb:disabled {
+  color: var(--fg);
+  cursor: default;
+}
+
+.library-crumb:not(:last-child)::after {
+  content: "/";
+  margin-left: var(--space-xs);
+  color: var(--fg-faint);
+}
+
+.library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.library-toolbar .ui-button {
+  padding: 8px var(--space-md);
+  min-height: 36px;
+  min-width: 0;
+}
+
+.library-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.library-mkdir {
+  display: flex;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 140px;
+}
+
+.library-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-xs);
+  border: 1px dashed rgb(255 255 255 / 12%);
+  border-radius: var(--radius-lg);
+}
+
+.library-pane.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.library-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-sm);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+}
+
+.library-picker-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.library-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-height: 36px;
+  padding-block: 6px;
+  padding-inline-end: var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: rgb(255 255 255 / 4%);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-picker-row:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+}
+
+.library-picker-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.library-picker-row.current {
+  outline: 1px solid var(--accent-line);
+}
+
+.library-sticky {
+  position: sticky;
+  top: calc(-1 * var(--space-xs));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  margin: calc(-1 * var(--space-xs)) calc(-1 * var(--space-xs)) 0;
+  padding: var(--space-xs);
+  background: rgb(25 33 52);
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.library-up {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 36px;
+  padding: 6px var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: rgb(255 255 255 / 6%);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-up:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px var(--space-sm);
+  border-radius: var(--radius-lg);
+}
+
+.library-row-dir {
+  background: rgb(255 255 255 / 3%);
+}
+
+.library-open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-ico {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-micro);
+}
+
+.library-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.library-action {
+  flex-shrink: 0;
+  min-height: 32px;
+  min-width: 44px;
+  padding: 4px 8px;
+}
+
+.track-enable {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.track-check {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.track-meta {
+  flex-shrink: 0;
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 弹窗进出场（原生 dialog：open 动画） */
 .settings-modal[open] {
   animation: settings-pop 180ms var(--ease);

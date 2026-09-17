@@ -31,6 +31,8 @@ export interface Scheduler {
   queueTrack(trackId: string): void;
   /** 故障拉黑（ER-004）：单曲损坏后本次运行内不再选它；重启自然恢复 */
   blacklistTrack(trackId: string): void;
+  /** 选曲池成员变化后调用：已 peek 且已不在池里的下一首作废（当前曲仍播完） */
+  refreshHeld(): void;
 }
 
 export function createScheduler(options: SchedulerOptions): Scheduler {
@@ -165,5 +167,12 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     if (held?.track.id === trackId) held = null;
   }
 
-  return { pickNext, peekNext, reportStarted, queueTrack, blacklistTrack };
+  function refreshHeld(): void {
+    const current = held;
+    if (current && !enabledTracks().some((t) => t.id === current.track.id)) {
+      held = null;
+    }
+  }
+
+  return { pickNext, peekNext, reportStarted, queueTrack, blacklistTrack, refreshHeld };
 }
