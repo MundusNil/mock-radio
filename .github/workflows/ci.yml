@@ -26,4 +26,5 @@ jobs:
 
       - run: pnpm test
       - run: pnpm check
+      - run: node scripts/agent/check-isolation.mjs
       - run: pnpm --filter @mock-radio/web build
