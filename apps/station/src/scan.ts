@@ -19,11 +19,12 @@ async function main(): Promise<void> {
   const dbPath = resolve(repoRoot, 'data', 'station.db');
   mkdirSync(dirname(dbPath), { recursive: true });
 
-  const tracks = await scanLibrary(libraryRoot);
+  const scanned = await scanLibrary(libraryRoot);
   const store = createStore(dbPath);
-  store.upsertTracks(tracks);
+  store.upsertTracks(scanned);
   // 清理已不存在的曲目（文件被删/移动后同步，避免残留记录被恢复）
-  store.deleteTracksNotIn(tracks.map((t) => t.path));
+  store.deleteTracksNotIn(scanned.map((t) => t.path));
+  const tracks = store.listTracks();
 
   console.log(`[scan] 曲库 ${tracks.length} 首已入库：${dbPath}`);
   const byStyle = new Map<string, number>();

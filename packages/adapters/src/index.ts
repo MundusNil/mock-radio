@@ -6,7 +6,10 @@ export type { OpenAiCompatibleOptions } from './llm';
 export { createOpenAiCompatibleLlm } from './llm';
 export type { DeskSearcher, LocalSearchOptions } from './local-search';
 export { createLocalDeskSearcher, htmlToText, keepProse } from './local-search';
-export type { RecentPlay, Store } from './store';
+export type {
+  RecentPlay,
+  Store,
+} from './store';
 export { createStore } from './store';
 export type { CreateTtsParams, EdgeTtsOptions, MiniMaxTtsOptions, TtsProviderName } from './tts';
 export { createEdgeTts, createMiniMaxTts, createTts, edgeRateFromSpeechRate } from './tts';

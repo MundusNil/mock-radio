@@ -25,9 +25,10 @@ async function main(): Promise<void> {
   mkdirSync(dirname(dbPath), { recursive: true });
   const store = createStore(dbPath);
   console.log('[station] 扫描曲库…');
-  const tracks = await scanLibrary(libraryRoot);
-  store.upsertTracks(tracks);
-  store.deleteTracksNotIn(tracks.map((t) => t.path));
+  const scanned = await scanLibrary(libraryRoot);
+  store.upsertTracks(scanned);
+  store.deleteTracksNotIn(scanned.map((t) => t.path));
+  const tracks = store.listTracks();
 
   if (tracks.length === 0) {
     console.error(

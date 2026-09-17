@@ -4,9 +4,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createReadStream, readFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import type { ServerType } from '@hono/node-server';
@@ -33,6 +33,14 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { DuckingConfig } from './config';
 import type { KeyDef } from './keys';
 import { applyKeys, keyStatus } from './keys';
+import { AUDIO_EXT, scanLibrary } from './library';
+import {
+  folderNameOk,
+  joinLibraryRel,
+  LibraryPathError,
+  parentLibraryDir,
+  resolveLibraryPath,
+} from './library-path';
 import type { VoiceConfigShape } from './voice';
 import { applyVoiceSettings, CADENCE_PRESETS, readVoiceSettings } from './voice';
 
@@ -113,9 +121,29 @@ export interface Radio {
   attachWs(server: ServerType): void;
 }
 
+interface LibraryFile {
+  id: string;
+  name: string;
+  title: string;
+  artist: string | null;
+  durationMs: number;
+  enabled: boolean;
+  path: string;
+}
+
+interface LibraryListing {
+  dir: string;
+  parent: string | null;
+  poolSize: number;
+  dirs: string[];
+  files: LibraryFile[];
+}
+
 export function createRadio(deps: RadioDeps): Radio {
-  const { tracks, libraryRoot, clock } = deps;
-  const trackById = new Map(tracks.map((t) => [t.id, t]));
+  const { libraryRoot, clock } = deps;
+  const libraryTracks = deps.tracks;
+  const poolTracks: Track[] = [];
+  const trackById = new Map(libraryTracks.map((t) => [t.id, t]));
   /** 当前生效的客户端（POST /api/admin/keys 后由工厂重建覆盖） */
   let currentLlm = deps.llmFactory();
   let currentTts = deps.ttsFactory();
@@ -139,7 +167,7 @@ export function createRadio(deps: RadioDeps): Radio {
 
   const engine = createEngine({ config: deps.engineConfig, rng: Math.random });
   const scheduler = createScheduler({
-    tracks,
+    tracks: poolTracks,
     config: deps.schedulerConfig,
     rng: Math.random,
   });
@@ -165,7 +193,7 @@ export function createRadio(deps: RadioDeps): Radio {
     stationName: deps.stationName,
     hostName: deps.hostName,
     retrieveMemories: (now) => programmeMemory.retrieve(now),
-    tracks,
+    tracks: poolTracks,
     maxSegmentChars: deps.maxSegmentChars,
     maxSegmentCharsByKind: deps.maxSegmentCharsByKind,
     onError: (err) => {
@@ -205,6 +233,97 @@ export function createRadio(deps: RadioDeps): Radio {
       };
     },
   });
+
+  function rebuildPool(): void {
+    poolTracks.length = 0;
+    poolTracks.push(...libraryTracks.filter((t) => t.enabled));
+    scheduler.refreshHeld();
+  }
+  rebuildPool();
+
+  function currentPlayPath(): string | null {
+    const id = engine.getSnapshot(clock.now()).trackId;
+    if (!id) return null;
+    return trackById.get(id)?.path ?? null;
+  }
+
+  function blocksPlaying(rel: string): boolean {
+    const cur = currentPlayPath();
+    if (!cur) return false;
+    return cur === rel || cur.startsWith(`${rel}/`);
+  }
+
+  async function reloadFromDisk(): Promise<void> {
+    const scanned = await scanLibrary(libraryRoot);
+    deps.store.upsertTracks(scanned);
+    deps.store.deleteTracksNotIn(scanned.map((t) => t.path));
+    const next = deps.store.listTracks();
+    libraryTracks.length = 0;
+    libraryTracks.push(...next);
+    trackById.clear();
+    for (const t of libraryTracks) trackById.set(t.id, t);
+    rebuildPool();
+    if (poolTracks.length > 0 && !engine.getSnapshot(clock.now()).trackId) {
+      startTrack(clock.now());
+    }
+  }
+
+  async function listingOf(dir: string): Promise<LibraryListing> {
+    const abs = resolveLibraryPath(libraryRoot, dir);
+    const info = await stat(abs).catch(() => null);
+    if (!info?.isDirectory()) throw new Error('目录不存在');
+    const entries = await readdir(abs, { withFileTypes: true });
+    const dirs: string[] = [];
+    const files: LibraryFile[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isDirectory()) {
+        dirs.push(entry.name);
+        continue;
+      }
+      if (!entry.isFile() || !AUDIO_EXT.has(extname(entry.name).toLowerCase())) continue;
+      const path = joinLibraryRel(dir, entry.name);
+      const track = libraryTracks.find((t) => t.path === path);
+      if (!track) continue;
+      files.push({
+        id: track.id,
+        name: entry.name,
+        title: track.title,
+        artist: track.artist,
+        durationMs: track.durationMs,
+        enabled: track.enabled,
+        path: track.path,
+      });
+    }
+    dirs.sort((a, b) => a.localeCompare(b, 'zh'));
+    files.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+    return {
+      dir,
+      parent: parentLibraryDir(dir),
+      poolSize: poolTracks.length,
+      dirs,
+      files,
+    };
+  }
+
+  function libraryFail(c: Context, err: unknown): Response {
+    if (err instanceof LibraryPathError) return c.json({ error: err.message }, 400);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === '目录不存在') return c.json({ error: message }, 404);
+    return c.json({ error: message }, 400);
+  }
+
+  async function readJsonObject(c: Context): Promise<Record<string, unknown> | Response> {
+    try {
+      const body = await c.req.json();
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return c.json({ error: '请求体必须是对象' }, 400);
+      }
+      return body as Record<string, unknown>;
+    } catch {
+      return c.json({ error: '请求体不是合法 JSON' }, 400);
+    }
+  }
   function maybePrefetch(track: Track | null | undefined): void {
     if (!track) return;
     if (!deps.runtimeConfig.engine.voiceEnabled) return;
@@ -242,7 +361,14 @@ export function createRadio(deps: RadioDeps): Radio {
   }
 
   function startTrack(at: number): void {
-    const decision = scheduler.pickNext(at);
+    let decision: ReturnType<typeof scheduler.pickNext>;
+    try {
+      decision = scheduler.pickNext(at);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[radio] 无法选下一首（${msg}）`);
+      return;
+    }
     scheduler.reportStarted(decision.track.id, at);
     engine.onTrackStarted(decision.track, at);
     try {
@@ -515,6 +641,148 @@ export function createRadio(deps: RadioDeps): Radio {
       return c.json({ ok: true, settings });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // ---- 设置面板：曲库资源管理器 ----
+
+  app.get('/api/admin/library', async (c) => {
+    try {
+      return c.json(await listingOf(c.req.query('dir') ?? ''));
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/tracks/enabled', async (c) => {
+    const rec = await readJsonObject(c);
+    if (rec instanceof Response) return rec;
+    if (typeof rec.id !== 'string' || rec.id.length === 0) {
+      return c.json({ error: '缺少 id' }, 400);
+    }
+    if (typeof rec.enabled !== 'boolean') {
+      return c.json({ error: 'enabled 必须是布尔值' }, 400);
+    }
+    const track = libraryTracks.find((t) => t.id === rec.id);
+    if (!track) return c.json({ error: '曲目不存在' }, 404);
+    track.enabled = rec.enabled;
+    deps.store.setTrackEnabled(rec.id, rec.enabled);
+    rebuildPool();
+    const dir = parentLibraryDir(track.path) ?? '';
+    try {
+      return c.json({ ok: true, ...(await listingOf(dir)) });
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/mkdir', async (c) => {
+    const rec = await readJsonObject(c);
+    if (rec instanceof Response) return rec;
+    const dir = typeof rec.dir === 'string' ? rec.dir : '';
+    const name = typeof rec.name === 'string' ? rec.name : '';
+    if (!folderNameOk(name)) return c.json({ error: '非法文件夹名' }, 400);
+    try {
+      const rel = joinLibraryRel(dir, name);
+      const abs = resolveLibraryPath(libraryRoot, rel);
+      if (existsSync(abs)) return c.json({ error: '已存在同名项' }, 409);
+      await mkdir(abs);
+      return c.json({ ok: true, ...(await listingOf(dir)) });
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/upload', async (c) => {
+    let form: FormData;
+    try {
+      form = await c.req.formData();
+    } catch {
+      return c.json({ error: '请求体必须是 multipart' }, 400);
+    }
+    const dirRaw = form.get('dir');
+    const dir = typeof dirRaw === 'string' ? dirRaw : '';
+    const file = form.get('file');
+    if (!(file instanceof File)) return c.json({ error: '缺少文件' }, 400);
+    const name = basename(file.name);
+    if (!AUDIO_EXT.has(extname(name).toLowerCase())) {
+      return c.json({ error: '不支持的音频格式' }, 400);
+    }
+    try {
+      const rel = joinLibraryRel(dir, name);
+      const abs = resolveLibraryPath(libraryRoot, rel);
+      const parent = await stat(resolveLibraryPath(libraryRoot, dir)).catch(() => null);
+      if (!parent?.isDirectory()) return c.json({ error: '目录不存在' }, 404);
+      if (existsSync(abs)) return c.json({ error: '已存在同名文件' }, 409);
+      await writeFile(abs, Buffer.from(await file.arrayBuffer()));
+      await reloadFromDisk();
+      return c.json({ ok: true, ...(await listingOf(dir)) });
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/move', async (c) => {
+    const rec = await readJsonObject(c);
+    if (rec instanceof Response) return rec;
+    if (typeof rec.from !== 'string' || rec.from.length === 0) {
+      return c.json({ error: '缺少 from' }, 400);
+    }
+    const toDir = typeof rec.toDir === 'string' ? rec.toDir : '';
+    const toName = typeof rec.toName === 'string' ? rec.toName : basename(rec.from);
+    try {
+      if (blocksPlaying(rec.from)) {
+        return c.json({ error: '正在播放，不能移动' }, 409);
+      }
+      const destRel = joinLibraryRel(toDir, toName);
+      const fromAbs = resolveLibraryPath(libraryRoot, rec.from);
+      const destAbs = resolveLibraryPath(libraryRoot, destRel);
+      if (!existsSync(fromAbs)) return c.json({ error: '源不存在' }, 404);
+      const fromInfo = await stat(fromAbs).catch(() => null);
+      if (!fromInfo || fromInfo.isDirectory() || !AUDIO_EXT.has(extname(fromAbs).toLowerCase())) {
+        return c.json({ error: '只能移动歌曲' }, 400);
+      }
+      const destParent = await stat(resolveLibraryPath(libraryRoot, toDir)).catch(() => null);
+      if (!destParent?.isDirectory()) return c.json({ error: '目标目录不存在' }, 404);
+      if (existsSync(destAbs)) return c.json({ error: '目标已存在' }, 409);
+      await rename(fromAbs, destAbs);
+      await reloadFromDisk();
+      return c.json({ ok: true, ...(await listingOf(toDir)) });
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/delete', async (c) => {
+    const rec = await readJsonObject(c);
+    if (rec instanceof Response) return rec;
+    if (typeof rec.path !== 'string' || rec.path.length === 0) {
+      return c.json({ error: '缺少 path' }, 400);
+    }
+    try {
+      if (blocksPlaying(rec.path)) {
+        return c.json({ error: '正在播放，不能删除' }, 409);
+      }
+      const abs = resolveLibraryPath(libraryRoot, rec.path);
+      if (!existsSync(abs)) return c.json({ error: '不存在' }, 404);
+      await rm(abs, { recursive: true, force: true });
+      await reloadFromDisk();
+      const dir = parentLibraryDir(rec.path) ?? '';
+      return c.json({ ok: true, ...(await listingOf(dir)) });
+    } catch (err) {
+      return libraryFail(c, err);
+    }
+  });
+
+  app.post('/api/admin/library/scan', async (c) => {
+    const rec = await readJsonObject(c);
+    if (rec instanceof Response) return rec;
+    const dir = typeof rec.dir === 'string' ? rec.dir : '';
+    try {
+      await reloadFromDisk();
+      return c.json({ ok: true, ...(await listingOf(dir)) });
+    } catch (err) {
+      return libraryFail(c, err);
     }
   });
 

@@ -23,6 +23,8 @@ import { RadioAudio } from './audio';
 // biome-ignore lint/correctness/noUnusedImports: used in template
 import GradientBackground from './GradientBackground.vue';
 // biome-ignore lint/correctness/noUnusedImports: used in template
+import LibrarySettings from './LibrarySettings.vue';
+// biome-ignore lint/correctness/noUnusedImports: used in template
 import { initialScheme, ORB_SCHEMES, type OrbScheme, persistScheme, schemeById } from './palettes';
 
 const info = ref<StationInfo | null>(null);
@@ -42,7 +44,7 @@ const scheme = ref<OrbScheme>(initialScheme());
 // PyCharm 式设置弹窗：<dialog> 模态；主题改动先预览，「确定/应用」才落库，「取消」回退
 const settingsOpen = ref(false);
 const settingsDialogEl = ref<HTMLDialogElement | null>(null);
-const activeSection = ref<'theme' | 'voice' | 'api'>('theme');
+const activeSection = ref<'theme' | 'voice' | 'library' | 'api'>('theme');
 const pendingSchemeId = ref(scheme.value.id);
 
 /** 主题改动只记在 pendingSchemeId：点「应用/确定」才落到 scheme（背景不即时变化） */
@@ -453,6 +455,14 @@ onUnmounted(() => {
           </button>
           <button
             class="settings-nav-item"
+            :class="{ active: activeSection === 'library' }"
+            :aria-current="activeSection === 'library' ? 'page' : undefined"
+            @click="activeSection = 'library'"
+          >
+            曲库
+          </button>
+          <button
+            class="settings-nav-item"
             :class="{ active: activeSection === 'api' }"
             :aria-current="activeSection === 'api' ? 'page' : undefined"
             @click="activeSection = 'api'"
@@ -577,6 +587,8 @@ onUnmounted(() => {
               </template>
             </div>
           </section>
+
+          <LibrarySettings v-show="activeSection === 'library'" :active="activeSection === 'library'" />
 
           <section v-show="activeSection === 'api'" aria-label="模型密钥">
             <h3 class="ui-label settings-section">模型密钥</h3>

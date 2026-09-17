@@ -160,3 +160,106 @@ export async function applyVoiceSettings(patch: Partial<VoiceSettings>): Promise
   if (!res.ok || !data.ok) throw new Error(data.error ?? `POST /api/admin/voice ${res.status}`);
   return data.settings as VoiceSettings;
 }
+
+// ---- 设置面板：曲库（本地文件夹资源管理器） ----
+
+export interface LibraryFile {
+  id: string;
+  name: string;
+  title: string;
+  artist: string | null;
+  durationMs: number;
+  enabled: boolean;
+  path: string;
+}
+
+export interface LibraryListing {
+  dir: string;
+  parent: string | null;
+  poolSize: number;
+  dirs: string[];
+  files: LibraryFile[];
+}
+
+export function decodeAdminJson<T>(status: number, text: string, fallback: string): T {
+  let data: T & { error?: string };
+  try {
+    data = JSON.parse(text) as T & { error?: string };
+  } catch {
+    if (status === 404) {
+      throw new Error('电台服务没有曲库接口。请先 pnpm stop，再 pnpm start 重启后再打开设置。');
+    }
+    throw new Error(`${fallback}（响应不是 JSON）`);
+  }
+  if (status < 200 || status >= 300) throw new Error(data.error ?? fallback);
+  return data;
+}
+
+async function readAdmin<T>(res: Response, fallback: string): Promise<T> {
+  return decodeAdminJson<T>(res.status, await res.text(), fallback);
+}
+
+export async function fetchLibrary(dir = ''): Promise<LibraryListing> {
+  const q = new URLSearchParams();
+  if (dir) q.set('dir', dir);
+  const suffix = q.size > 0 ? `?${q}` : '';
+  const res = await fetch(`/api/admin/library${suffix}`);
+  return readAdmin<LibraryListing>(res, `/api/admin/library ${res.status}`);
+}
+
+export async function setTrackEnabled(id: string, enabled: boolean): Promise<LibraryListing> {
+  const res = await fetch('/api/admin/library/tracks/enabled', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, enabled }),
+  });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/tracks/enabled ${res.status}`);
+}
+
+export async function mkdirLibrary(dir: string, name: string): Promise<LibraryListing> {
+  const res = await fetch('/api/admin/library/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, name }),
+  });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/mkdir ${res.status}`);
+}
+
+export async function uploadLibrary(dir: string, file: File): Promise<LibraryListing> {
+  const body = new FormData();
+  body.set('dir', dir);
+  body.set('file', file);
+  const res = await fetch('/api/admin/library/upload', { method: 'POST', body });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/upload ${res.status}`);
+}
+
+export async function moveLibrary(
+  from: string,
+  toDir: string,
+  toName?: string,
+): Promise<LibraryListing> {
+  const res = await fetch('/api/admin/library/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, toDir, toName }),
+  });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/move ${res.status}`);
+}
+
+export async function deleteLibrary(path: string): Promise<LibraryListing> {
+  const res = await fetch('/api/admin/library/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/delete ${res.status}`);
+}
+
+export async function scanLibrary(dir = ''): Promise<LibraryListing> {
+  const res = await fetch('/api/admin/library/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir }),
+  });
+  return readAdmin<LibraryListing>(res, `POST /api/admin/library/scan ${res.status}`);
+}
