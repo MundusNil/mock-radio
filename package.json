@@ -24,7 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "agent:harness": "node scripts/agent/check.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.9",
